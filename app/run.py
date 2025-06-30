@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 load_dotenv(override=True)
 
 
+# Start the server
 def start():
     """Launches the Uvicorn server."""
-    uvicorn.run("app.main:app", reload=True)
+    uvicorn.run("app.main:app", log_level="debug")

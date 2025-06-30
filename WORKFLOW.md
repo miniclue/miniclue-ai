@@ -1,0 +1,642 @@
+# Tech Stack
+
+| Layer / Component                          | Technology & Notes                              |
+| ------------------------------------------ | ----------------------------------------------- |
+| **Frontend**                               | Next.js (React)                                 |
+| • TipTap WYSIWYG editor                    |                                                 |
+| **API Gateway**                            | Golang (stlib)                                  |
+| • Route groups under `/api/v1` (see below) |                                                 |
+| • JWT middleware validating Supabase JWT   |                                                 |
+| **Auth**                                   | Supabase Auth (Google provider)                 |
+| **Object Storage**                         | Supabase Storage                                |
+| **Relational & Vector**                    | Supabase Postgres (serverless)                  |
+| • pgvector (vector embeddings)             |                                                 |
+| • pgmq (Supabase Queues)                   |                                                 |
+| **Message Queue**                          | Supabase Queues (pgmq)                          |
+| **AI Microservices**                       | Python (FastAPI) on Vercel/Fly.io               |
+| **PDF Parsing**                            | PyMuPDF or PDFMiner                             |
+| **Embeddings**                             | OpenAI / Claude / Gemini Embedding APIs         |
+| **LLM Inference**                          | OpenAI GPT-4o / Claude / Gemini                 |
+| **Containerization**                       | Docker (for Python services) on Vercel / Fly.io |
+| **CI/CD**                                  | GitHub Actions                                  |
+| **Monitoring & Logging**                   | Supabase Logs → Grafana / DataDog               |
+| **Cache (Later)**                          | Managed Redis (e.g. Upstash or Redis Cloud)     |
+
+# Repos
+
+| Purpose                         | Type   | Deployment                          | Remarks      |
+| ------------------------------- | ------ | ----------------------------------- | ------------ |
+| Frontend                        | NextJS | Vercel Serverless                   |              |
+| Backend API Gateway             | Go     | Google Cloud Run (Serverless)       | Same Go Repo |
+| Backend worker service          | Go     | Google Cloud Run (min. 1 instance)  | Same Go Repo |
+| PDF processing and AI LLM calls | Python | Google Cloud Run, Fly.io Serverless |              |
+
+<aside>
+💡
+
+Rationale:
+
+1. Separate worker service and PDF processing because worker service needs to constantly poll pgmq and cannot be deployed serverless
+2. Choice of Go instead of Python for backend worker service is because it is easier to write, and it is also smaller and cheaper to run
+</aside>
+
+## Worker Service Modes
+
+The Go worker binary supports four modes:
+
+- `ingestion`: Polls `ingestion_queue` and processes ingestion jobs.
+- `embedding`: Polls `embedding_queue` and processes embedding jobs.
+- `explanation`: Polls `explanation_queue` and processes explanation jobs.
+- `summary`: Polls `summary_queue` and processes summary jobs.
+
+### Building and Running the Worker
+
+First build the worker binary:
+
+- make build-orchestrator
+
+Then run a specific mode:
+
+- make run-orchestrator-ingestion
+- make run-orchestrator-embedding
+- make run-orchestrator-explanation
+- make run-orchestrator-summary
+
+# Key API Route Groups
+
+```
+/api/v1/courses
+├── POST / → create course
+├── GET /:courseId → fetch course
+├── PUT /:courseId → update course
+└── DELETE /:courseId → delete course
+
+/api/v1/lectures
+├── POST / → create lecture
+├── GET / → list lectures (query by course_id) (`?limit=&offset=`)
+├── GET /:lectureId → fetch lecture
+├── PUT /:lectureId → update lecture metadata
+└── DELETE /:lectureId → delete lecture
+
+/api/v1/lectures/:lectureId
+├── GET /summary → get lecture summary
+├── GET /explanations → list lecture explanations (`?limit=&offset=`)
+├── GET /notes → get lecture notes
+├── POST /notes → create lecture note
+└── PATCH /notes → update lecture note
+
+/api/v1/users/me
+├── GET / → fetch user profile
+├── POST / → create or update profile
+├── GET /courses → list user's courses
+└── GET /recents → list recent lectures (`?limit=&offset=`)
+```
+
+# Authentication
+
+1. **Sign-in**
+   - Next.js → Supabase Auth (Google OAuth) → issues a JWT.
+   - JWT stored in a secure, HTTP-only cookie.
+2. **API Gateway**
+   - Every request to `/api/v1/*` carries the Supabase JWT.
+   - Go middleware verifies token, enforces row-level security on `user_id`.
+
+# Data Flow
+
+## 3.1. Client Upload → Go API
+
+1. **Request**
+
+   ```
+   POST /api/v1/lectures
+   Content-Type: multipart/form-data
+   Body: { file: <PDF>, metadata… }
+   ```
+
+2. **Go API Handler**
+   - Create lecture record with status `uploading`
+   - Store PDF in Supabase Storage at `lectures/{lectureId}/original.pdf`.
+   - Store S3 URL in database
+   - Update status to `pending_processing`
+   - Enqueue a job on `ingestion_queue` with payload `{ lecture_id, storage_path }`.
+   - On error, roll back DB and/or enqueue a cleanup job.
+
+---
+
+## 3.2. Ingestion Orchestrator (Go)
+
+**Trigger:** new message on `ingestion_queue`
+
+1. **Poll & Receive**
+   - Go worker does a long-poll: `pgmq.read_with_poll('ingestion_queue', …)` → `{ lecture_id, storage_path }`.
+2. Update lecture `status` to parsing
+3. **Call Python Ingestion Service**
+
+   ```
+   POST http://python-ai/ingest
+   Content-Type: application/json
+   Body: { "lecture_id": …, "storage_path": … }
+   ```
+
+4. **Ack or Retry**
+   - On HTTP 200: Go worker `DELETE` the message from `ingestion_queue` and emit metrics. UPDATE `lectures.status = 'embedding'` and `updated_at = NOW()`.
+   - **Error Handling**: let the Go orchestrator retry with exponential backoff; on repeated failures, move the job to your DLQ, update `lectures.status = 'failed'` and set `lectures.error_message`
+
+### 3.2.1 Python Ingestion Service
+
+1. **Download & Open PDF**
+   - Fetch bytes from Supabase Storage using your S3 client.
+   - Open the bytes in memory with PyMuPDF, yielding a `Document` with one page per slide.
+   - Update the `lectures` table's `total_slides` column to `doc.page_count`.
+2. **Initialise In-Run Content Registry**
+
+   - Create an empty map:
+
+     ```
+     content_registry = {}   # maps phash → storage_path
+
+     ```
+
+3. **For each slide (page) in `doc`:**
+
+   1. **Reserve Slide & Initialise Counters**
+
+      - Compute `slide_number = page_index + 1`.
+      - Insert row into slides (in transaction)
+
+        ```
+        INSERT INTO slides (lecture_id, slide_number, total_chunks, processed_chunks)
+        VALUES (lecture_id, slide_number, 0, 0)
+        ON CONFLICT DO NOTHING;
+
+        ```
+
+   2. **Extract Text**
+      - Call `page.get_text()` → `raw_text`.
+   3. **Extract Images**
+      - Call `page.get_images(full=True)` → list of image references.
+      - For each reference:
+        - Call `doc.extract_image(xref)` → `{ "image": bytes, "width": ..., "height": ..., "ext": ... }`.
+        - Convert the extracted bytes to an image object for OCR/BLIP and hashing.
+   4. **[Text] Chunk, Persist & Enqueue Embeddings (use transaction)**
+      1. Split `raw_text` into chunks of ~1000 tokens with 200-token overlap.
+      2. Let `total = number_of_chunks`.
+      3. UPDATE `slides.total_chunks = total` for this slide.
+      4. For each chunk with index `i`:
+         - INSERT chunk row into `chunks` table (slide_id, lecture_id, slide_number, i, text, token_count).
+         - Send a message to `embedding_queue` containing `{ chunk_id, slide_id, lecture_id, slide_number }`.
+   5. **[Image] Decorative vs Content Deduplication**
+
+      1. **Extract OCR & Alt-Text**
+         - Run Tesseract on each extracted image → `ocr_text`.
+         - Run BLIP on each extracted image → `alt_text`.
+      2. **Compute Perceptual Hash**
+         - Generate `phash = compute_phash(image)`.
+      3. **Classify**
+         - If `ocr_text` has ≥30 characters **or** `alt_text` has ≥4 words **and** ≥30 characters, **and** `alt_text` is not exactly "a diagram" / "an image" / "slide illustration", then mark **content**; else **decorative**.
+      4. **Branch & Deduplicate**
+
+         - **If content**:
+
+           - If `phash` in `content_registry`, reuse its `storage_path`.
+           - Otherwise, upload bytes to
+
+             ```
+             lectures/{lectureId}/slides/{slideNumber}/raw_images/{imageIndex}.png
+
+             ```
+
+             store that path in `content_registry[phash]`.
+
+         - **If decorative**:
+
+           - Query `decorative_images_global` for a row with this exact `image_hash`.
+           - If found, reuse its `storage_path`.
+           - If not, upload bytes to
+
+             ```
+             global/images/{image_hash}.png
+
+             ```
+
+             then INSERT into `decorative_images_global(image_hash, storage_path)`.
+
+         - **Record Slide-Image Metadata in DB for both content and decorative**
+
+           - Insert one `slide_images` row capturing:
+
+             - `slide_id`, `lecture_id`, `slide_number`, `image_index`
+             - Chosen `storage_path` (new or reused)
+             - `image_hash`
+             - `type` - content/decorative
+             - `ocr_text`/`alt_text`
+             - Image dimensions (`width`, `height`)
+               <aside>
+               💡
+
+               **Naming conventions**
+
+               - **Content images** → `lectures/{lectureId}/slides/{slideNumber}/raw_images/{imageIndex}.{ext}`
+               - **Decorative images** → `global/images/{image_hash}.png`
+               </aside>
+
+4. **Reliability & Idempotency**
+   - Wrap each slide's work (slides row, chunk inserts, image dedupe + metadata) in a DB transaction keyed on `slide_id`.
+   - Use `ON CONFLICT DO NOTHING` for idempotent inserts (slides, decorative_images_global).
+   - Log metrics and return rich error details back to the Go orchestrator for retry/DLQ handling.
+
+---
+
+## 3.3. Embedding Orchestrator (Go)
+
+**Trigger:** new message on `embedding_queue`
+
+1. **Poll & Receive**
+
+   Read a job from `embedding_queue`, which now carries:
+
+   ```json
+   {
+     "chunk_id": "...",
+     "slide_id": "...",
+     "lecture_id": "...",
+     "slide_number": 3
+   }
+   ```
+
+2. **Call Python Embedding Service**
+
+   ```
+   POST http://python-ai/embed
+   Content-Type: application/json
+
+   {
+     "chunk_id":     "...",
+     "slide_id": "...",
+     "lecture_id":   "...",
+     "slide_number": 3
+   }
+   ```
+
+3. **Ack or Retry**
+   - On HTTP 200: `DELETE` the message from `embedding_queue`, emit success metrics.
+   - **Error Handling**: let the Go orchestrator retry with exponential backoff; on repeated failures, move the job to your DLQ, update `lectures.status = 'failed'` and set `lectures.error_message`
+
+### **3.3.1 Python Embedding Service**
+
+1. **Parse Payload**
+
+   Extract `chunk_id`, `lecture_id`, and `slide_number` from the request body.
+
+2. **Fetch Chunk & Embed**
+
+   - `SELECT text FROM chunks WHERE id = :chunk_id`
+   - Call your embedding API (OpenAI/Claude/Gemini) to get a vector.
+   - **UPSERT** into the `embeddings` table:
+
+     ```sql
+     INSERT INTO embeddings
+       (chunk_id, slide_id, lecture_id, slide_number, vector, metadata)
+     VALUES
+       (:chunk_id, :slide_id, :lecture_id, :slide_number, :vector, :meta)
+     ON CONFLICT (chunk_id) DO UPDATE
+       SET vector = EXCLUDED.vector,
+           updated_at = NOW();
+
+     ```
+
+3. **Update Slide Progress and check for completion**
+
+   ```sql
+   -- Atomically update and get the new values
+   WITH updated AS (
+     UPDATE slides
+        SET processed_chunks = processed_chunks + 1
+      WHERE id = :slide_id
+     RETURNING processed_chunks, total_chunks
+   )
+   SELECT processed_chunks, total_chunks FROM updated;
+   ```
+
+4. If `processed_chunks = total_chunks`, send a new job:
+
+   ```sql
+   SELECT processed_chunks, total_chunks
+     FROM slides
+    WHERE lecture_id   = :lecture_id
+      AND slide_number = :slide_number;
+
+   ```
+
+   If `processed_chunks = total_chunks`, send a new job:
+
+   ```
+   pgmq.send("explanation_queue", {
+     "slide_id": "...",
+     "lecture_id":   "...",
+     "slide_number": 3
+   })
+   ```
+
+5. **Update lecture status if all slides embedded**
+
+   1. Check if processed_chunks = total_chunks for all slides
+   2. If yes, update lecture `status` to `explaining`
+
+   ```jsx
+   SELECT COUNT(*)
+     FROM slides
+    WHERE lecture_id = :lecture_id
+      AND processed_chunks < total_chunks;
+   ```
+
+6. **Emit Metrics & Ack**
+
+   Record token usage and timing, then respond HTTP 200.
+
+---
+
+## 3.4. Explanation Orchestrator (Go)
+
+**Trigger:** new message on `explanation_queue`
+
+Payload:
+
+```json
+{
+  "slide_id": "...",
+  "lecture_id":   "...",
+  "slide_number": N
+}
+```
+
+1. **Poll & Receive**
+
+   Read the job off the queue.
+
+2. **Wait for Previous Explanation**
+
+   ```sql
+   SELECT 1
+     FROM explanations
+    WHERE lecture_id   = :lecture_id
+      AND slide_number = :slide_number - 1;
+
+   ```
+
+   If `slide_number > 1` and no row, return non-200 (NACK) so the orchestrator retries with backoff.
+
+3. **Call Python Explanation Service**
+
+   ```
+   POST http://python-ai/explain
+   Content-Type: application/json
+
+   {
+     "slide_id": "...",
+     "lecture_id":   "...",
+     "slide_number": N
+   }
+   ```
+
+4. **Ack or Retry**
+   - On HTTP 200: delete message, emit success metrics.
+   - **Error Handling**: let the Go orchestrator retry with exponential backoff; on repeated failures, move the job to your DLQ, update `lectures.status = 'failed'` and set `lectures.error_message`
+
+---
+
+### 3.4.1 Python Explanation Service
+
+1. **Parse Payload**
+
+   Read `lecture_id` and `slide_number`.
+
+2. **Fetch Context in One Go**
+
+   ```sql
+   SELECT slide_number, one_liner
+     FROM explanations
+    WHERE lecture_id   = :lecture_id
+      AND slide_number < :slide_number
+    ORDER BY slide_number DESC
+    LIMIT 3;
+
+   ```
+
+   ```python
+   rows = db.fetch_all(...)
+   if rows:
+       previousOneLiner = rows[0].one_liner
+   contextRecap = [r.one_liner for r in rows]  # up to 3
+
+   ```
+
+3. **Fetch Current Slide Data**
+
+   - **Chunks**:
+
+     ```sql
+     SELECT text
+       FROM chunks
+      WHERE lecture_id   = :lecture_id
+        AND slide_number = :slide_number
+      ORDER BY chunk_index;
+
+     ```
+
+   - **Images**: non-decorative `ocr_text`/`alt_text` from `slide_images`.
+
+4. **Fetch Related Concepts (Partial Context)**
+
+   ```sql
+   -- build query vector from combined current-chunk text
+   SELECT text
+     FROM embeddings
+    WHERE lecture_id = :lecture_id
+   ORDER BY vector <-> :query_vector
+   LIMIT K;
+
+   ```
+
+5. **Prompt Assembly & API Call**
+
+   ```python
+   import openai
+
+   # 1. System message defines roles and instructions
+   system_msg = """
+   You are an AI teaching assistant specialized in university lectures.
+   For each slide, you will:
+   1. Judge whether it is:
+      • an **Introduction** (lecture cover),
+      • a **Transition** (section header), or
+      • a **Content** slide.
+   2. Based on that classification:
+      - For **Introduction**: output a one-liner overview of the lecture and a brief paragraph on its importance.
+      - For **Transition**: output a one-liner preview of the upcoming topic and a single-sentence transition.
+      - For **Content**: output a one-liner key takeaway and a detailed explanation using the Minto Pyramid structure (point → supporting details).
+   3. Always explain jargon, write in plain English, and include emojis and rhetorical questions sparingly.
+   4. Do **NOT** preview future slides.
+   5. Return **valid JSON** exactly with two fields:
+      `{ "one_liner": "...", "content": "..." }`
+   """
+
+   # 2. Build the user prompt with slide data
+   user_prompt = f"""
+   Slide #{slide_number}
+   Previous takeaway: "{previous_one_liner}"
+   Context recap (last up to 3): {', '.join(context_recap)}
+
+   Text chunks:
+   {chr(10).join(current_chunks)}
+
+   Image OCR texts:
+   {', '.join(ocr_texts)}
+
+   Image alt texts:
+   {', '.join(alt_texts)}
+
+   Now follow the system instructions above.
+   """
+
+   # 3. Call OpenAI
+   response = openai.responses.create(
+       model="gpt-4o",
+       messages=[
+           {"role": "system", "content": system_msg},
+           {"role": "user",   "content": user_prompt}
+       ],
+       temperature=0.7,
+   )
+
+   # 4. Parse JSON from the assistant
+   data = response.choices[0].message["content"]
+   one_liner = data["one_liner"]
+   content    = data["content"]
+
+   ```
+
+6. **Persist Explanation**
+
+   ```sql
+   INSERT INTO explanations
+     (slide_id, lecture_id, slide_number, content, one_liner, metadata)
+   VALUES
+     (
+       (SELECT id FROM slides
+         WHERE lecture_id = :lecture_id
+           AND slide_number = :slide_number),
+       :lecture_id, :slide_number,
+       :content, :one_liner, '{}'::JSONB
+     );
+
+   ```
+
+7. **Update Lecture Progress**
+
+   ```sql
+   UPDATE lectures
+      SET processed_slides = processed_slides + 1
+    WHERE id   = :lecture_id
+
+   ```
+
+8. **Check for Completion & Enqueue summary**
+
+   ```sql
+   SELECT processed_slides, total_slides
+     FROM lectures
+    WHERE id   = :lecture_id
+
+   ```
+
+   If `processed_slides = total_slides` , update lecture `status` to `summarising` and enqueue summary queue
+
+   ```python
+   pgmq.send("summary_queue", {"lecture_id": lecture_id})
+
+   ```
+
+9. **Logging & Metrics**
+
+   Emit timing, token usage, and errors. Return HTTP 200 only after all steps complete successfully.
+
+---
+
+## 3.5. Summary Orchestrator (Go)
+
+**Trigger:** new message on `summary_queue`
+
+1. **Poll & Receive** → `{ lecture_id }`
+2. **Call Python Summary Service**
+
+   ```
+   POST http://python-ai/summarize
+   Body: { "lecture_id": … }
+
+   ```
+
+3. **Ack or Retry**
+   - On HTTP 200: delete message, emit success metrics.
+   - **Error Handling**: let the Go orchestrator retry with exponential backoff; on repeated failures, move the job to your DLQ, update `lectures.status = 'failed'` and set `lectures.error_message`
+
+### **3.5.1. Python Summary Service**
+
+1. **Gather Explanations**
+
+   ```sql
+   SELECT content FROM explanations
+    WHERE lecture_id = :lectureId
+    ORDER BY slide_number;
+   ```
+
+2. **Build Prompt**
+
+   ```python
+   import openai
+
+   # 1. System prompt
+   system_msg = """
+   You are an expert AI teaching assistant for technical engineering lectures.
+   Given a sequence of slide-by-slide explanations, produce a cohesive lecture summary that:
+   1. Synthesizes the main learning objectives.
+   2. Highlights how the slide-level insights connect into a unified narrative.
+   3. Uses advanced engineering terminology appropriately.
+   4. Is concise — no more than 300 words.
+   Deliver the result as a single paragraph.
+   """
+
+   # 2. Build user content
+   lecture_title = "Dynamics of Fluid Flow"
+   slide_explanations = [
+       "Slide 1 explanation …",
+       "Slide 2 explanation …",
+       # …etc…
+   ]
+
+   user_content = f"Below are per-slide explanations for the lecture "{lecture_title}":\n\n"
+   for i, expl in enumerate(slide_explanations, start=1):
+       user_content += f"[Slide {i}] {expl}\n\n"
+   user_content += "Please follow the instructions above and return only the final summary paragraph."
+
+   # 3. Call the Responses API
+   response = openai.responses.create(
+       model="gpt-4o",
+       messages=[
+           {"role": "system", "content": system_msg},
+           {"role": "user",   "content": user_content}
+       ],
+       temperature=0.3,
+       max_tokens=400,
+   )
+
+   # 4. Extract the summary
+   summary = response.choices[0].message["content"].strip()
+   print("Lecture Summary:\n", summary)
+
+   ```
+
+3. **Call LLM** → get summary.
+4. **Insert** into `summaries(lecture_id, content…)`.
+5. Update lecture `status` to `complete` and set `completed_at = NOW()`
+6. **Metrics & Errors**: log token usage, cost, and fallback on over-length.

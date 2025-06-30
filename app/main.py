@@ -1,20 +1,16 @@
-import logging
-
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.utils.config import Settings
-from app.utils.logging import setup_logging
 from app.routers import ingest, embed, explain, summarize
+
+import logging
+
 
 # Load configuration
 settings = Settings()
 
-# Set up logging
-setup_logging()
-
-# Create FastAPI app
 app = FastAPI()
 
 
@@ -22,6 +18,14 @@ app = FastAPI()
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+# Debug endpoint
+@app.get("/debug/config")
+async def debug_config():
+    """Returns the current application configuration for debugging."""
+    fresh = Settings()
+    return fresh.model_dump()
 
 
 # Exception handlers
@@ -41,10 +45,3 @@ app.include_router(ingest)
 app.include_router(embed)
 app.include_router(explain)
 app.include_router(summarize)
-
-
-@app.get("/debug/config")
-async def debug_config():
-    """Returns the current application configuration for debugging."""
-    fresh = Settings()
-    return fresh.model_dump()
