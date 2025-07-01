@@ -293,7 +293,7 @@ Then run a specific mode:
 2. **Fetch Chunk & Embed**
 
    - `SELECT text FROM chunks WHERE id = :chunk_id`
-   - Call your embedding API (OpenAI/Claude/Gemini) to get a vector.
+   - Call your embedding API (OpenAI) to get a vector.
    - **UPSERT** into the `embeddings` table:
 
      ```sql
@@ -307,7 +307,7 @@ Then run a specific mode:
 
      ```
 
-3. **Update Slide Progress and check for completion**
+3. **Update Slide Progress and check if all chunks have been embedded for that slide**
 
    ```sql
    -- Atomically update and get the new values
@@ -321,16 +321,6 @@ Then run a specific mode:
    ```
 
 4. If `processed_chunks = total_chunks`, send a new job:
-
-   ```sql
-   SELECT processed_chunks, total_chunks
-     FROM slides
-    WHERE lecture_id   = :lecture_id
-      AND slide_number = :slide_number;
-
-   ```
-
-   If `processed_chunks = total_chunks`, send a new job:
 
    ```
    pgmq.send("explanation_queue", {

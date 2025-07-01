@@ -18,19 +18,7 @@ A FastAPI microservice to handle AI‐driven lecture pipeline jobs (ingestion, e
 
 ## Environment Variables
 
-Set the following environment variables:
-
-- S3_ACCESS_KEY
-- S3_SECRET_KEY
-- S3_BUCKET_NAME
-- S3_ENDPOINT_URL
-- POSTGRES_DSN
-- LLM_API_KEY
-- LLM_API_ENDPOINT
-- INGESTION_QUEUE
-- EMBEDDING_QUEUE
-- EXPLANATION_QUEUE
-- SUMMARY_QUEUE
+Set the following environment variables in .env.example.
 
 ## API Endpoints
 
