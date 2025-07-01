@@ -307,7 +307,7 @@ Then run a specific mode:
 
      ```
 
-3. **Update Slide Progress and check if all chunks have been embedded for that slide**
+3. **Update Slide Progress and check if all chunks are embedded for that slide**
 
    ```sql
    -- Atomically update and get the new values
@@ -330,7 +330,7 @@ Then run a specific mode:
    })
    ```
 
-5. **Update lecture status if all slides embedded**
+5. **Update lecture status if all slides are embedded for that lecture**
 
    1. Check if processed_chunks = total_chunks for all slides
    2. If yes, update lecture `status` to `explaining`

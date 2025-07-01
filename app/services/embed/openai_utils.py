@@ -1,5 +1,6 @@
 import json
 import logging
+import random
 
 from openai import OpenAI
 
@@ -34,5 +35,28 @@ def get_embedding(text: str) -> tuple[str, str]:
         metadata["prompt_tokens"] = getattr(usage, "prompt_tokens", None)
         metadata["total_tokens"] = getattr(usage, "total_tokens", None)
     metadata_str = json.dumps(metadata)
+
+    return vector_str, metadata_str
+
+
+def mock_get_embedding(text: str) -> tuple[str, str]:
+    """
+    Mock embedding function for development purposes.
+    Returns a fake embedding vector and metadata.
+    """
+    # Generate a fake embedding vector with 1536 dimensions (typical for OpenAI embeddings)
+    fake_vector = [random.uniform(-1, 1) for _ in range(1536)]
+    vector_str = json.dumps(fake_vector)
+
+    # Generate fake metadata
+    metadata = {
+        "model": "text-embedding-ada-002",
+        "prompt_tokens": len(text.split()),
+        "total_tokens": len(text.split()),
+        "mock": True,
+    }
+    metadata_str = json.dumps(metadata)
+
+    logging.info(f"Mock embedding generated for text of length {len(text)}")
 
     return vector_str, metadata_str

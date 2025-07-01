@@ -9,7 +9,7 @@ from app.services.embed.db_utils import (
     update_slide_progress,
     upsert_embedding,
 )
-from app.services.embed.openai_utils import get_embedding
+from app.services.embed.openai_utils import get_embedding, mock_get_embedding
 from app.utils.config import Settings
 
 settings = Settings()
@@ -35,7 +35,7 @@ async def embed(chunk_id: UUID, slide_id: UUID, lecture_id: UUID, slide_number: 
     conn = await asyncpg.connect(settings.postgres_dsn)
     try:
         text = await get_chunk_text(conn, chunk_id)
-        vector, metadata = get_embedding(text)
+        vector, metadata = mock_get_embedding(text)
 
         async with conn.transaction():
             await upsert_embedding(
