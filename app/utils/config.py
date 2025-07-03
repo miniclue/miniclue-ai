@@ -16,5 +16,6 @@ class Settings(BaseSettings):
     openai_api_base_url: str = ""
     xai_api_key: str = ""
     xai_api_base_url: str = ""
+    mock_llm_calls: bool = False
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")

@@ -594,12 +594,9 @@ Payload:
    1. Synthesizes the main learning objectives.
    2. Highlights how the slide-level insights connect into a unified narrative.
    3. Uses advanced engineering terminology appropriately.
-   4. Is concise — no more than 300 words.
-   Deliver the result as a single paragraph.
    """
 
    # 2. Build user content
-   lecture_title = "Dynamics of Fluid Flow"
    slide_explanations = [
        "Slide 1 explanation …",
        "Slide 2 explanation …",

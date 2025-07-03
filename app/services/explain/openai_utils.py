@@ -75,7 +75,7 @@ def generate_explanation(
 Return your answer as a valid JSON object with the following fields:
 ```json
   "slide_type": "cover" | "header" | "content",
-  "one_liner": "Short summary here (≤ 25 words).",
+  "one_liner": "Key takeaway here (≤ 25 words).",
   "content": "Full explanation here in Markdown and LaTeX."
 ```
 Only return the JSON. Do not include any additional text or explanation.
@@ -196,7 +196,7 @@ def mock_generate_explanation(
 Return your answer as a valid JSON object with the following fields:
 ```json
   "slide_type": "cover" | "header" | "content",
-  "one_liner": "Short summary here (≤ 25 words).",
+  "one_liner": "Key takeaway here (≤ 25 words).",
   "content": "Full explanation here in Markdown and LaTeX."
 ```
 Only return the JSON. Do not include any additional text or explanation.

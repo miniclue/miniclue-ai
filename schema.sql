@@ -132,6 +132,7 @@ CREATE INDEX idx_embeddings_lecture_slide ON embeddings(lecture_id, slide_number
 CREATE TABLE IF NOT EXISTS summaries (
   lecture_id  UUID        PRIMARY KEY REFERENCES lectures(id) ON DELETE CASCADE,
   content     TEXT        NOT NULL,
+  metadata     JSONB       NOT NULL DEFAULT '{}'::JSONB,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

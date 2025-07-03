@@ -35,7 +35,10 @@ async def embed(chunk_id: UUID, slide_id: UUID, lecture_id: UUID, slide_number: 
     conn = await asyncpg.connect(settings.postgres_dsn)
     try:
         text = await get_chunk_text(conn, chunk_id)
-        vector, metadata = get_embedding(text)
+        if settings.mock_llm_calls:
+            vector, metadata = mock_get_embedding(text)
+        else:
+            vector, metadata = get_embedding(text)
 
         async with conn.transaction():
             await upsert_embedding(
