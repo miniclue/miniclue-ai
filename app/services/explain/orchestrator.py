@@ -48,7 +48,11 @@ async def explain(slide_id: UUID, lecture_id: UUID, slide_number: int):
         full_text = await fetch_slide_text(conn, slide_id)
 
         # Fetch related concepts (partial context) via vector similarity
-        vector_str, _ = get_embedding(full_text)
+        if settings.mock_llm_calls:
+            vector_str, _ = mock_get_embedding(full_text)
+        else:
+            vector_str, _ = get_embedding(full_text)
+
         related_concepts = await fetch_related_concepts(
             conn,
             lecture_id,
@@ -58,15 +62,26 @@ async def explain(slide_id: UUID, lecture_id: UUID, slide_number: int):
         )
         ocr_texts, alt_texts = await fetch_image_data(conn, lecture_id, slide_number)
 
-        slide_type, one_liner, content, metadata_str = generate_explanation(
-            slide_number,
-            context_recap,
-            previous_one_liner,
-            full_text,
-            related_concepts,
-            ocr_texts,
-            alt_texts,
-        )
+        if settings.mock_llm_calls:
+            slide_type, one_liner, content, metadata_str = mock_generate_explanation(
+                slide_number,
+                context_recap,
+                previous_one_liner,
+                full_text,
+                related_concepts,
+                ocr_texts,
+                alt_texts,
+            )
+        else:
+            slide_type, one_liner, content, metadata_str = generate_explanation(
+                slide_number,
+                context_recap,
+                previous_one_liner,
+                full_text,
+                related_concepts,
+                ocr_texts,
+                alt_texts,
+            )
 
         await persist_explanation_and_update_progress(
             conn,

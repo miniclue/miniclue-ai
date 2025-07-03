@@ -39,7 +39,7 @@ Return this classification as a slide_type field in your output.
 ```json
 {
 "slide_type": "cover" | "header" | "content",
-"one_liner": "Short summary here (≤ 25 words).",
+"one_liner": "Key takeaway here (≤ 25 words).",
 "content": "Full explanation in Markdown. Use LaTeX for any equations."
 }
 ```
