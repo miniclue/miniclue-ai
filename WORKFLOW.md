@@ -116,7 +116,7 @@ Then run a specific mode:
 2. **Go API Handler**
    - Create lecture record with status `uploading`
    - Store PDF in Supabase Storage at `lectures/{lectureId}/original.pdf`.
-   - Store S3 URL in database
+   - Store storage path in database
    - Update status to `pending_processing`
    - Enqueue a job on `ingestion_queue` with payload `{ lecture_id, storage_path }`.
    - On error, roll back DB and/or enqueue a cleanup job.
