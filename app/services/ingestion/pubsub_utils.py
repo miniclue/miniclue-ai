@@ -8,7 +8,13 @@ from app.utils.config import Settings
 
 
 settings = Settings()
-publisher = pubsub_v1.PublisherClient()
+
+if settings.pubsub_emulator_host:
+    publisher = pubsub_v1.PublisherClient(
+        client_options={"api_endpoint": settings.pubsub_emulator_host}
+    )
+else:
+    publisher = pubsub_v1.PublisherClient()
 
 
 def _publish_message(topic_name: str, data: dict):

@@ -3,13 +3,13 @@ from uuid import UUID
 
 import asyncpg
 
-from app.services.embed.db_utils import (
+from app.services.embedding.db_utils import (
     enqueue_explanation_job_if_complete,
     get_chunk_text,
     update_slide_progress,
     upsert_embedding,
 )
-from app.services.embed.openai_utils import get_embedding, mock_get_embedding
+from app.services.embedding.openai_utils import get_embedding, mock_get_embedding
 from app.utils.config import Settings
 
 settings = Settings()

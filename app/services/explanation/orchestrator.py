@@ -3,18 +3,18 @@ from uuid import UUID
 
 import asyncpg
 
-from app.services.explain.db_utils import (
+from app.services.explanation.db_utils import (
     fetch_context,
     fetch_image_data,
     fetch_slide_text,
     fetch_related_concepts,
     persist_explanation_and_update_progress,
 )
-from app.services.explain.openai_utils import (
+from app.services.explanation.openai_utils import (
     generate_explanation,
     mock_generate_explanation,
 )
-from app.services.embed.openai_utils import get_embedding, mock_get_embedding
+from app.services.embedding.openai_utils import get_embedding, mock_get_embedding
 from app.utils.config import Settings
 
 settings = Settings()

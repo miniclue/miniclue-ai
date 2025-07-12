@@ -3,6 +3,13 @@ from uuid import UUID
 import asyncpg
 
 
+async def verify_lecture_exists(conn: asyncpg.Connection, lecture_id: UUID) -> bool:
+    """Verifies that a lecture with the given ID exists in the database."""
+    return await conn.fetchval(
+        "SELECT EXISTS(SELECT 1 FROM lectures WHERE id=$1)", lecture_id
+    )
+
+
 async def update_lecture_status(
     conn: asyncpg.Connection, lecture_id: UUID, status: str
 ):
@@ -121,21 +128,27 @@ async def insert_slide_image(
     )
 
 
-async def get_slides_for_lecture(conn: asyncpg.Connection, lecture_id: UUID):
-    """Fetches all slides for a given lecture to dispatch explanation jobs."""
+async def get_slides_with_images_for_lecture(
+    conn: asyncpg.Connection, lecture_id: UUID
+):
+    """
+    Fetches all slides for a given lecture with their corresponding full-slide image path,
+    ready for dispatching explanation jobs.
+    """
     return await conn.fetch(
-        "SELECT id, slide_number FROM slides WHERE lecture_id=$1 ORDER BY slide_number",
-        lecture_id,
-    )
-
-
-async def get_slide_image_path(conn: asyncpg.Connection, slide_id: UUID) -> str | None:
-    """Fetches the storage path for the main rendered image of a slide."""
-    return await conn.fetchval(
         """
-        SELECT storage_path FROM slide_images
-        WHERE slide_id = $1 AND type = 'full_slide_render'
-        LIMIT 1
+        SELECT
+            s.id,
+            s.slide_number,
+            si.storage_path AS slide_image_path
+        FROM
+            slides s
+        LEFT JOIN
+            slide_images si ON s.id = si.slide_id AND si.type = 'full_slide_render'
+        WHERE
+            s.lecture_id = $1
+        ORDER BY
+            s.slide_number
         """,
-        slide_id,
+        lecture_id,
     )

@@ -22,5 +22,10 @@ class Settings(BaseSettings):
     xai_api_key: str = ""
     xai_api_base_url: str = ""
     mock_llm_calls: bool = False
+    # Server
+    host: str = "127.0.0.1"
+    port: int = 8000
+    # Pub/Sub Emulator
+    pubsub_emulator_host: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")

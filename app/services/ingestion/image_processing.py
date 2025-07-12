@@ -8,9 +8,9 @@ import pymupdf
 from PIL import Image
 import asyncpg
 
-from app.services.ingest.db_utils import insert_slide_image
-from app.services.ingest.s3_utils import upload_image
-from app.services.ingest.pubsub_utils import publish_image_analysis_job
+from app.services.ingestion.db_utils import insert_slide_image
+from app.services.ingestion.s3_utils import upload_image
+from app.services.ingestion.pubsub_utils import publish_image_analysis_job
 from app.utils.config import Settings
 
 settings = Settings()

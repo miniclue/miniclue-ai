@@ -6,22 +6,22 @@ import asyncpg
 import boto3
 import pymupdf
 
-from app.services.ingest.db_utils import (
+from app.services.ingestion.db_utils import (
     get_or_create_chunk,
     get_or_create_slide,
     set_lecture_parsing,
     update_lecture_sub_image_count,
     update_lecture_status,
-    get_slides_for_lecture,
-    get_slide_image_path,
+    get_slides_with_images_for_lecture,
+    verify_lecture_exists,
 )
-from app.services.ingest.image_processing import (
+from app.services.ingestion.image_processing import (
     process_slide_sub_images,
     render_and_upload_slide_image,
 )
-from app.services.ingest.s3_utils import download_pdf
-from app.services.ingest.text_processing import chunk_text_by_tokens
-from app.services.ingest.pubsub_utils import (
+from app.services.ingestion.s3_utils import download_pdf
+from app.services.ingestion.text_processing import chunk_text_by_tokens
+from app.services.ingestion.pubsub_utils import (
     publish_embedding_job,
     publish_explanation_job,
 )
@@ -60,6 +60,13 @@ async def ingest(lecture_id: UUID, storage_path: str):
     try:
         conn = await asyncpg.connect(settings.postgres_dsn)
         logging.info("Postgres connection established")
+
+        # Verify the lecture exists before proceeding (Defensive Subscriber)
+        if not await verify_lecture_exists(conn, lecture_id):
+            logging.warning(
+                f"Lecture with ID {lecture_id} not found. Acknowledging message and stopping."
+            )
+            return
 
         pdf_bytes = download_pdf(s3_client, settings.s3_bucket_name, storage_path)
         doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
@@ -115,22 +122,21 @@ async def ingest(lecture_id: UUID, storage_path: str):
         logging.info(f"Found {total_sub_images} unique sub-images in total.")
 
         # Dispatch explanation jobs for every slide
-        slides_for_jobs = await get_slides_for_lecture(conn, lecture_id)
+        slides_for_jobs = await get_slides_with_images_for_lecture(conn, lecture_id)
         logging.info(f"Dispatching {len(slides_for_jobs)} explanation jobs...")
         for slide_record in slides_for_jobs:
-            slide_id = slide_record["id"]
-            slide_image_path = await get_slide_image_path(conn, slide_id)
+            slide_image_path = slide_record["slide_image_path"]
             if slide_image_path:
                 publish_explanation_job(
                     lecture_id=lecture_id,
-                    slide_id=slide_id,
+                    slide_id=slide_record["id"],
                     slide_number=slide_record["slide_number"],
                     total_slides=total_slides,
                     slide_image_path=slide_image_path,
                 )
             else:
                 logging.warning(
-                    f"Could not find full slide image for slide_id {slide_id}. Skipping explanation job."
+                    f"Could not find full slide image for slide_id {slide_record['id']}. Skipping explanation job."
                 )
 
         if total_sub_images == 0:
