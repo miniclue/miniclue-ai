@@ -3,11 +3,11 @@ from uuid import UUID
 
 import asyncpg
 
-from app.services.summarize.db_utils import (
+from app.services.summary.db_utils import (
     fetch_explanations,
     persist_summary_and_update_lecture,
 )
-from app.services.summarize.openai_utils import (
+from app.services.summary.openai_utils import (
     generate_summary,
     mock_generate_summary,
 )

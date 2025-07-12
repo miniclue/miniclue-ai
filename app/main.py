@@ -3,7 +3,13 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.utils.config import Settings
-from app.routers import ingest, embed, explain, summarize
+from app.routers import (
+    embedding,
+    explanation,
+    ingestion,
+    image_analysis,
+    summary,
+)
 
 import logging
 
@@ -11,17 +17,17 @@ import logging
 # Load configuration
 settings = Settings()
 
-app = FastAPI()
+app = FastAPI(title="MiniClue AI Service")
 
 
 # Health endpoint
-@app.get("/health")
+@app.get("/health", tags=["health"])
 async def health():
     return {"status": "ok"}
 
 
 # Debug endpoint
-@app.get("/debug/config")
+@app.get("/debug/config", tags=["debug"])
 async def debug_config():
     """Returns the current application configuration for debugging."""
     fresh = Settings()
@@ -40,8 +46,9 @@ async def generic_exception_handler(request: Request, exc: Exception):
     return JSONResponse(status_code=500, content={"detail": "Internal Server Error"})
 
 
-# Include routers
-app.include_router(ingest)
-app.include_router(embed)
-app.include_router(explain)
-app.include_router(summarize)
+# Include routers for Pub/Sub push subscriptions
+app.include_router(ingestion.router)
+app.include_router(embedding.router)
+app.include_router(explanation.router)
+app.include_router(summary.router)
+app.include_router(image_analysis.router)

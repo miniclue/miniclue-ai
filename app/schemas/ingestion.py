@@ -1,7 +1,7 @@
-from pydantic import BaseModel
 from uuid import UUID
+from pydantic import BaseModel
 
 
-class IngestRequest(BaseModel):
+class IngestionPayload(BaseModel):
     lecture_id: UUID
     storage_path: str
