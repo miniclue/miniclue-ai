@@ -1,247 +1,144 @@
 import io
 import logging
 from uuid import UUID
+from typing import Dict
 
 import imagehash
 import pymupdf
-import pytesseract
 from PIL import Image
+import asyncpg
 
-from app.services.ingest.db_utils import (
-    find_decorative_image,
-    insert_decorative_image,
-    insert_slide_image,
-)
+from app.services.ingest.db_utils import insert_slide_image
 from app.services.ingest.s3_utils import upload_image
+from app.services.ingest.pubsub_utils import publish_image_analysis_job
 from app.utils.config import Settings
-
 
 settings = Settings()
 
 
-def initialize_blip():
-    try:
-        from transformers import BlipProcessor, BlipForConditionalGeneration
-
-        blip_processor = BlipProcessor.from_pretrained(
-            "Salesforce/blip-image-captioning-base", use_fast=True
-        )
-        blip_model = BlipForConditionalGeneration.from_pretrained(
-            "Salesforce/blip-image-captioning-base"
-        )
-        blip_enabled = True
-        logging.info("BLIP models loaded successfully.")
-        return blip_processor, blip_model, blip_enabled
-    except ImportError:
-        logging.warning(
-            "transformers/BLIP dependencies not found. BLIP will be disabled."
-        )
-        return None, None, False
-
-
-def _process_image_content(
-    img: Image.Image,
-    blip_processor,
-    blip_model,
-    blip_enabled: bool,
-    log_identifier: str,
-) -> tuple[str, str]:
-    """Helper to run OCR and BLIP on a PIL image."""
-    ocr_text = pytesseract.image_to_string(img)
-
-    alt_text = ""
-    if blip_enabled and blip_processor and blip_model:
-        try:
-            inputs = blip_processor(images=img, return_tensors="pt")
-            out = blip_model.generate(**inputs)
-            alt_text = blip_processor.decode(out[0], skip_special_tokens=True)
-        except Exception as e:
-            logging.warning(f"BLIP failed for {log_identifier}: {e}")
-            pass
-    return ocr_text, alt_text
-
-
-def _classify_image(alt_text: str, ocr_text: str) -> str:
-    lower_alt_text = alt_text.lower()
-
-    content_keywords = {
-        "diagram",
-        "chart",
-        "graph",
-        "table",
-        "screenshot",
-        "code",
-        "equation",
-        "map",
-        "plot",
-    }
-
-    decorative_keywords = {
-        "logo",
-        "icon",
-        "banner",
-        "background",
-        "illustration",
-        "photo",
-        "picture",
-        "drawing",
-        "artwork",
-        "decoration",
-    }
-
-    if any(kw in lower_alt_text for kw in content_keywords):
-        img_type = "content"
-    elif any(kw in lower_alt_text for kw in decorative_keywords):
-        img_type = "decorative"
-    elif ocr_text and len(ocr_text) >= 30:
-        img_type = "content"
-    elif alt_text and len(alt_text.split()) >= 4 and len(alt_text) >= 30:
-        img_type = "content"
-    else:
-        img_type = "decorative"
-    return img_type
-
-
-async def process_slide_images(
-    doc,
+async def render_and_upload_slide_image(
+    doc: pymupdf.Document,
     s3_client,
-    conn,
+    conn: asyncpg.Connection,
     page_index: int,
     lecture_id: UUID,
     slide_id: UUID,
-    blip_processor,
-    blip_model,
-    blip_enabled,
-    content_registry,
 ):
-    page = doc.load_page(page_index)
+    """
+    Renders a full-resolution image of a slide, uploads it to S3,
+    and saves its metadata to the database.
+    """
     slide_number = page_index + 1
-    images = page.get_images(full=True)
+    page = doc.load_page(page_index)
+    storage_path = ""
 
-    if not images:
-        logging.info(f"No images found on slide {slide_number}")
-        return
-
-    logging.info(f"Found {len(images)} images on slide {slide_number}, processing...")
-    for img_index, img_ref in enumerate(images):
-        xref = img_ref[0]
-        try:
-            info = doc.extract_image(xref)
-        except Exception as e:
-            logging.error(
-                f"Failed to extract image xref={xref} on slide {slide_number}: {e}"
-            )
-            continue
-
-        img_bytes = info["image"]
-        width = info["width"]
-        height = info["height"]
-        ext = info.get("ext", "png")
-        img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
-
-        log_identifier = f"Image {img_index+1} on slide {slide_number}"
-        ocr_text, alt_text = _process_image_content(
-            img, blip_processor, blip_model, blip_enabled, log_identifier
-        )
+    try:
+        # Use a higher DPI for better quality
+        matrix = pymupdf.Matrix(2, 2)
+        pix = page.get_pixmap(matrix=matrix)
+        img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
         phash = str(imagehash.phash(img))
-        img_type = _classify_image(alt_text, ocr_text)
-        logging.info(f"Image {img_index+1} classified as '{img_type}'")
 
         buffer = io.BytesIO()
         img.save(buffer, format="PNG")
         img_data = buffer.getvalue()
 
-        if img_type == "content":
-            if phash in content_registry:
-                img_path = content_registry[phash]
-            else:
-                img_key = f"lectures/{lecture_id}/slides/{slide_number}/raw_images/{img_index}.{ext}"
-                upload_image(
-                    s3_client,
-                    settings.s3_bucket_name,
-                    img_key,
-                    img_data,
-                    f"image/{ext}",
-                )
-                img_path = f"s3://{settings.s3_bucket_name}/{img_key}"
-                content_registry[phash] = img_path
-        else:
-            img_path = await find_decorative_image(conn, phash)
-            if not img_path:
-                img_key = f"global/images/{phash}.png"
-                upload_image(
-                    s3_client,
-                    settings.s3_bucket_name,
-                    img_key,
-                    img_data,
-                    "image/png",
-                )
-                img_path = f"s3://{settings.s3_bucket_name}/{img_key}"
-                await insert_decorative_image(conn, phash, img_path)
+        storage_key = f"lectures/{lecture_id}/slides/{slide_number}/full_slide.png"
+        upload_image(
+            s3_client, settings.s3_bucket_name, storage_key, img_data, "image/png"
+        )
+        storage_path = f"s3://{settings.s3_bucket_name}/{storage_key}"
 
         await insert_slide_image(
             conn,
-            slide_id,
-            lecture_id,
-            slide_number,
-            img_index,
-            img_path,
-            phash,
-            img_type,
-            ocr_text,
-            alt_text,
-            width,
-            height,
+            slide_id=slide_id,
+            lecture_id=lecture_id,
+            image_hash=phash,
+            storage_path=storage_path,
+            image_type="full_slide_render",
         )
+        logging.info(f"Uploaded full rendered image for slide {slide_number}")
+
+    except Exception as e:
+        logging.error(
+            f"Failed to render or upload full slide image for slide {slide_number}: {e}"
+        )
+        # Depending on requirements, you might want to re-raise or handle differently
+    return storage_path
 
 
-async def process_rendered_slide(
-    doc,
+async def process_slide_sub_images(
+    doc: pymupdf.Document,
     s3_client,
-    conn,
+    conn: asyncpg.Connection,
     page_index: int,
     lecture_id: UUID,
     slide_id: UUID,
-    blip_processor,
-    blip_model,
-    blip_enabled,
+    processed_images_map: Dict[str, str],
 ):
-    slide_number = page_index + 1
+    """
+    Extracts all sub-images from a slide, uploads new ones, records them in the
+    database, and publishes analysis jobs for the new ones.
+    """
     page = doc.load_page(page_index)
-    try:
-        matrix = pymupdf.Matrix(2, 2)
-        pix = page.get_pixmap(matrix=matrix)
-        img_full = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+    slide_number = page_index + 1
+    images = page.get_images(full=True)
 
-        log_identifier_full = f"Rendered slide {slide_number}"
-        ocr_full, alt_full = _process_image_content(
-            img_full, blip_processor, blip_model, blip_enabled, log_identifier_full
-        )
-        phash_full = str(imagehash.phash(img_full))
+    if not images:
+        logging.info(f"No sub-images found on slide {slide_number}")
+        return
 
-        buffer_full = io.BytesIO()
-        img_full.save(buffer_full, format="PNG")
-        full_data = buffer_full.getvalue()
-        key_full = f"lectures/{lecture_id}/slides/{slide_number}/slide_image.png"
-        upload_image(
-            s3_client, settings.s3_bucket_name, key_full, full_data, "image/png"
-        )
-        path_full = f"s3://{settings.s3_bucket_name}/{key_full}"
+    logging.info(
+        f"Found {len(images)} sub-images on slide {slide_number}, processing..."
+    )
+    for img_ref in images:
+        xref = img_ref[0]
+        try:
+            img_info = doc.extract_image(xref)
+            img_bytes = img_info["image"]
+            img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+            image_hash = str(imagehash.phash(img))
 
-        await insert_slide_image(
-            conn,
-            slide_id,
-            lecture_id,
-            slide_number,
-            -1,
-            path_full,
-            phash_full,
-            "slide_image",
-            ocr_full,
-            alt_full,
-            pix.width,
-            pix.height,
-        )
-        logging.info(f"Rendered full slide image uploaded for slide {slide_number}")
-    except Exception as e:
-        logging.error(f"Failed to render full slide {slide_number}: {e}")
+            storage_path = processed_images_map.get(image_hash)
+            is_new_image = storage_path is None
+
+            if is_new_image:
+                # This is a new, unique image. Upload it.
+                ext = img_info.get("ext", "png")
+                storage_key = f"lectures/{lecture_id}/images/{image_hash}.{ext}"
+                upload_image(
+                    s3_client,
+                    settings.s3_bucket_name,
+                    storage_key,
+                    img_bytes,
+                    f"image/{ext}",
+                )
+                storage_path = f"s3://{settings.s3_bucket_name}/{storage_key}"
+                processed_images_map[image_hash] = storage_path
+                logging.info(
+                    f"Uploaded new unique image with hash {image_hash} from slide {slide_number}"
+                )
+
+            # Create a record for this image instance on this specific slide
+            slide_image_id = await insert_slide_image(
+                conn,
+                slide_id=slide_id,
+                lecture_id=lecture_id,
+                image_hash=image_hash,
+                storage_path=storage_path,
+                image_type=None,  # Type will be determined by the analysis service
+            )
+
+            if is_new_image:
+                # Publish a job only for the newly uploaded image
+                publish_image_analysis_job(
+                    slide_image_id=slide_image_id,
+                    lecture_id=lecture_id,
+                    image_hash=image_hash,
+                )
+
+        except Exception as e:
+            logging.error(
+                f"Failed to process sub-image with xref {xref} on slide {slide_number}: {e}"
+            )
+            continue

@@ -1,81 +1,80 @@
 # Tech Stack
 
-| Layer / Component                          | Technology & Notes                              |
-| ------------------------------------------ | ----------------------------------------------- |
-| **Frontend**                               | Next.js (React)                                 |
-| • TipTap WYSIWYG editor                    |                                                 |
-| **API Gateway**                            | Golang (stlib)                                  |
-| • Route groups under `/api/v1` (see below) |                                                 |
-| • JWT middleware validating Supabase JWT   |                                                 |
-| **Auth**                                   | Supabase Auth (Google provider)                 |
-| **Object Storage**                         | Supabase Storage                                |
-| **Relational & Vector**                    | Supabase Postgres (serverless)                  |
-| • pgvector (vector embeddings)             |                                                 |
-| • pgmq (Supabase Queues)                   |                                                 |
-| **Message Queue**                          | Supabase Queues (pgmq)                          |
-| **AI Microservices**                       | Python (FastAPI)                                |
-| **PDF Parsing**                            | PyMuPDF                                         |
-| **Embeddings**                             | OpenAI / Groq                                   |
-| **LLM Inference**                          | OpenAI / Groq                                   |
-| **Containerization**                       | Docker (for Python services) on Vercel / Fly.io |
-| **CI/CD**                                  | GitHub Actions                                  |
-| **Monitoring & Logging**                   | Supabase Logs → Grafana / DataDog               |
-| **Cache (Later)**                          | Managed Redis (e.g. Upstash or Redis Cloud)     |
+| Layer / Component                        | Technology & Notes                          |
+| ---------------------------------------- | ------------------------------------------- |
+| **Frontend**                             | Next.js (React)                             |
+| • TipTap WYSIWYG editor                  |                                             |
+| **API Gateway**                          | Golang (stlib)                              |
+| • Route groups under `/v1` (see below)   |                                             |
+| • JWT middleware validating Supabase JWT |                                             |
+| **Auth**                                 | Supabase Auth (Google provider)             |
+| **Object Storage**                       | Supabase Storage                            |
+| **Relational & Vector**                  | Supabase Postgres (serverless)              |
+| • pgvector (vector embeddings)           |                                             |
+| **Message Queue**                        | Google Cloud Pub/Sub                        |
+| **AI Microservices**                     | Python (FastAPI)                            |
+| **PDF Parsing**                          | PyMuPDF                                     |
+| **Embeddings**                           | OpenAI                                      |
+| **LLM Inference**                        | OpenAI                                      |
+| **Containerization**                     | Docker on Google Cloud Run                  |
+| **CI/CD**                                | GitHub Actions                              |
+| **Monitoring & Logging**                 | Supabase Logs / Sentry                      |
+| **Cache (Later)**                        | Managed Redis (e.g. Upstash or Redis Cloud) |
 
 # Repos
 
-| Purpose                         | Type   | Deployment                          | Remarks      |
-| ------------------------------- | ------ | ----------------------------------- | ------------ |
-| Frontend                        | NextJS | Vercel Serverless                   |              |
-| Backend API Gateway             | Go     | Google Cloud Run (Serverless)       | Same Go Repo |
-| Backend worker service          | Go     | Google Cloud Run (min. 1 instance)  | Same Go Repo |
-| PDF processing and AI LLM calls | Python | Google Cloud Run, Fly.io Serverless |              |
+| Purpose                         | Type   | Deployment                    |
+| ------------------------------- | ------ | ----------------------------- |
+| Frontend                        | NextJS | Vercel Serverless             |
+| Backend API Gateway             | Go     | Google Cloud Run (Serverless) |
+| PDF processing and AI LLM calls | Python | Google Cloud Run (Serverless) |
 
-<aside>
-💡
+# Pub/Sub Push-Based Workflow
 
-Rationale:
+We use Google Cloud Pub/Sub with push subscriptions to Python API endpoints:
 
-1. Separate worker service and PDF processing because worker service needs to constantly poll pgmq and cannot be deployed serverless
-2. Choice of Go instead of Python for backend worker service is because it is easier to write, and it is also smaller and cheaper to run
-</aside>
+- **Topics**: ingestion, embedding, explanation, summary
+- **Subscriptions**: configured as push to `/{topic}` on your API server
+- **Retry & Dead-Letter**: Each subscription has an exponential backoff policy (min:10s, max:10m). After exceeding max delivery attempts, failed messages are forwarded to a dead-letter topic, which pushes via HTTP POST to the `/dlq` endpoint on your API gateway. There, payloads are persisted in the database for logging and manual inspection.
+- **Ack Deadline**: Configure each subscription's `ackDeadlineSeconds` to match your expected processing time (e.g., 60s), and use the client library's ack-deadline lease-extension API in long-running handlers to renew the deadline before it expires, preventing premature redelivery.
+- **Handling Deleted Data (Defensive Subscribers)**: Pub/Sub does not support directly deleting specific in-flight messages. Instead, subscribers must be "defensive." Before processing a message, a subscriber should always query the database to confirm the associated lecture or entity still exists. If it has been deleted, the subscriber should simply acknowledge the message to prevent redelivery and take no further action. This approach is resilient to race conditions and simplifies the deletion logic in the main API.
 
-## Worker Service Modes
+# FastAPI Push Handlers
 
-The Go worker binary supports four modes:
+Base URL:
 
-- `ingestion`: Polls `ingestion_queue` and processes ingestion jobs.
-- `embedding`: Polls `embedding_queue` and processes embedding jobs.
-- `explanation`: Polls `explanation_queue` and processes explanation jobs.
-- `summary`: Polls `summary_queue` and processes summary jobs.
+- Local: http://127.0.0.1:8000
+- Staging: https://stg.svc.miniclue.com
+- Production: https://svc.miniclue.com
 
-### Building and Running the Worker
+/ingestion → Python ingestion endpoint
+/embedding → Python embedding endpoint
+/image-analysis → Python image analysis endpoint
+/explanation → Python explanation endpoint
+/summary → Python summary endpoint
 
-First build the worker binary:
+Pub/Sub pushes directly to your Python services, which handle the entire async pipeline including status updates and publishes for downstream jobs.
 
-- make build-orchestrator
+# Go API Routes
 
-Then run a specific mode:
+Base URL:
 
-- make run-orchestrator-ingestion
-- make run-orchestrator-embedding
-- make run-orchestrator-explanation
-- make run-orchestrator-summary
-
-# Key API Route Groups
+- Local: http://127.0.0.1:8080
+- Staging: https://stg.api.miniclue.com/v1
+- Production: https://api.miniclue.com/v1
 
 ```
 /api/v1/courses
 ├── POST / → create course
 ├── GET /:courseId → fetch course
-├── PUT /:courseId → update course
+├── PATCH /:courseId → update course
 └── DELETE /:courseId → delete course
 
 /api/v1/lectures
 ├── POST / → create lecture
 ├── GET / → list lectures (query by course_id) (`?limit=&offset=`)
 ├── GET /:lectureId → fetch lecture
-├── PUT /:lectureId → update lecture metadata
+├── PATCH /:lectureId → update lecture metadata
 └── DELETE /:lectureId → delete lecture
 
 /api/v1/lectures/:lectureId
@@ -101,231 +100,144 @@ Then run a specific mode:
    - Every request to `/api/v1/*` carries the Supabase JWT.
    - Go middleware verifies token, enforces row-level security on `user_id`.
 
-# Data Flow
+# AI Processing Design: Two Parallel Tracks
 
-## 3.1. Client Upload → Go API
+The new system is designed around two parallel processing tracks that start after the initial upload. This makes the system faster and more robust.
 
-1. **Request**
+1.  **The Explanation Track (Fast Lane):** This track's only goal is to generate high-quality, slide-by-slide explanations for the user as quickly as possible. It uses slide images and a powerful AI to create the core value of the app.
+2.  **The Search-Enrichment Track (Background Lane):** This track runs in the background. Its job is to meticulously extract all text, generate embeddings, and prepare the data for the future RAG-based chat feature. It's important, but it doesn't block the user from seeing results.
 
-   ```
-   POST /api/v1/lectures
-   Content-Type: multipart/form-data
-   Body: { file: <PDF>, metadata… }
-   ```
+# Format of messages in topics
 
-2. **Go API Handler**
-   - Create lecture record with status `uploading`
-   - Store PDF in Supabase Storage at `lectures/{lectureId}/original.pdf`.
-   - Store storage path in database
-   - Update status to `pending_processing`
-   - Enqueue a job on `ingestion_queue` with payload `{ lecture_id, storage_path }`.
-   - On error, roll back DB and/or enqueue a cleanup job.
+1.  ingestion
 
----
+```
+  {
+  "lecture_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "storage_path": "lectures/55bdef4b-b9ac-4783-b8e4-87b47675333e/original.pdf"
+  }
+```
 
-## 3.2. Ingestion Orchestrator (Go)
+2. image-analysis
 
-**Trigger:** new message on `ingestion_queue`
-
-1. **Poll & Receive**
-   - Go worker does a long-poll: `pgmq.read_with_poll('ingestion_queue', …)` → `{ lecture_id, storage_path }`.
-2. Update lecture `status` to parsing
-3. **Call Python Ingestion Service**
-
-   ```
-   POST http://python-ai/ingest
-   Content-Type: application/json
-   Body: { "lecture_id": …, "storage_path": … }
-   ```
-
-4. **Ack or Retry**
-   - On HTTP 200: Go worker `DELETE` the message from `ingestion_queue` and emit metrics. UPDATE `lectures.status = 'embedding'` and `updated_at = NOW()`.
-   - **Error Handling**: let the Go orchestrator retry with exponential backoff; on repeated failures, move the job to your DLQ, update `lectures.status = 'failed'` and set `lectures.error_message`
-
-### 3.2.1 Python Ingestion Service
-
-**Input**
-
-- `lecture_id` (UUID): The unique identifier for the lecture.
-- `storage_path` (string): The path to the PDF file in object storage.
-
-This service is triggered by a message on the `ingestion_queue`.
-
-1.  **Initialization**: The service initializes clients for Supabase Storage (S3) and Postgres, and optionally loads the Salesforce BLIP model for image captioning if its dependencies are installed.
-
-2.  **Download & Parse PDF**: It downloads the PDF from storage and opens it in memory using PyMuPDF. It then updates the lecture record in the database with the total number of slides.
-
-3.  **Process Each Slide**: The service iterates through each slide of the PDF within a database transaction to ensure atomicity.
-
-    - **Text Processing**: It extracts all raw text from the slide. This text is then broken down into smaller, overlapping chunks using the `tiktoken` library. Each chunk is saved to the database, and a corresponding job is sent to the `embedding_queue` to be processed later.
-    - **Image Processing**: It extracts all embedded images from the slide. For each image, it performs several steps:
-      - **Analysis**: It runs Optical Character Recognition (OCR) using Tesseract and, if enabled, generates a descriptive caption (alt-text) using the BLIP model.
-      - **Classification**: Based on keywords in the caption and the amount of text from OCR, it classifies the image as either "content" (e.g., diagrams, charts) or "decorative" (e.g., logos, backgrounds).
-      - **Deduplication & Storage**: It computes a perceptual hash of each image to avoid storing duplicates. Decorative images are checked against a global table and stored in a shared `global/` folder if new. Content images are checked against a lecture-specific registry and stored in a folder for that lecture.
-    - **Full Slide Rendering**: Finally, it renders a high-resolution image of the entire slide. This rendered image is also processed with OCR and BLIP, and the result is saved to storage. All image metadata (paths, hashes, OCR/alt-text) is stored in the database.
-
-4.  **Completion**: Once all slides are processed, the service logs the completion of the ingestion task.
-
----
-
-## 3.3. Embedding Orchestrator (Go)
-
-**Trigger:** new message on `embedding_queue`
-
-1. **Poll & Receive**
-
-   Read a job from `embedding_queue`, which now carries:
-
-   ```json
-   {
-     "chunk_id": "...",
-     "slide_id": "...",
-     "lecture_id": "...",
-     "slide_number": 3
-   }
-   ```
-
-2. **Call Python Embedding Service**
-
-   ```
-   POST http://python-ai/embed
-   Content-Type: application/json
-
-   {
-     "chunk_id":     "...",
-     "slide_id": "...",
-     "lecture_id":   "...",
-     "slide_number": 3
-   }
-   ```
-
-3. **Ack or Retry**
-   - On HTTP 200: `DELETE` the message from `embedding_queue`, emit success metrics.
-   - **Error Handling**: let the Go orchestrator retry with exponential backoff; on repeated failures, move the job to your DLQ, update `lectures.status = 'failed'` and set `lectures.error_message`
-
-### **3.3.1 Python Embedding Service**
-
-**Input**
-
-- `chunk_id` (UUID): The unique identifier for the text chunk.
-- `slide_id` (UUID): The unique identifier for the slide.
-- `lecture_id` (UUID): The unique identifier for the lecture.
-- `slide_number` (integer): The number of the slide within the lecture.
-
-This service is triggered by a message on the `embedding_queue` for each text chunk created during ingestion.
-
-1.  **Fetch & Embed**: It fetches the text of a specific chunk from the database. It then calls an embedding API (like OpenAI's) to convert the text into a numerical vector.
-
-2.  **Store Embedding**: The generated vector is saved into the `embeddings` table in the database, linked to its corresponding chunk and slide.
-
-3.  **Update Progress & Enqueue Next Job**: The service atomically increments a counter (`processed_chunks`) for the parent slide.
-    - **Explanation Job**: Once all chunks for a slide have been embedded (i.e., `processed_chunks` equals `total_chunks`), it enqueues a new job on the `explanation_queue` for that slide.
-    - **Lecture Status**: It also checks if all slides for the lecture are fully embedded. If so, it updates the main lecture's status to `explaining`.
-
----
-
-## 3.4. Explanation Orchestrator (Go)
-
-**Trigger:** new message on `explanation_queue`
-
-Payload:
-
-```json
+```
 {
-  "slide_id": "...",
-  "lecture_id":   "...",
-  "slide_number": N
+"slide_image_id": "f1e2d3c4-b5a6-7890-fedc-ba0987654321",
+"lecture_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+"image_hash": "b432a1098fedcba"
 }
 ```
 
-1. **Poll & Receive**
+3. embedding
 
-   Read the job off the queue.
+```
+{
+  "lecture_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+}
+```
 
-2. **Wait for Previous Explanation**
+4. explanation
 
-   ```sql
-   SELECT 1
-     FROM explanations
-    WHERE lecture_id   = :lecture_id
-      AND slide_number = :slide_number - 1;
+```
+{
+"lecture_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+"slide_id": "c1b2a398-d4e5-f678-90ab-cdef12345678",
+"slide_number": 5,
+"total_slides": 30,
+"slide_image_path": "lectures/a1b2.../slides/5.png"
+}
+```
 
-   ```
+5. summmary
 
-   If `slide_number > 1` and no row, return non-200 (NACK) so the orchestrator retries with backoff.
+```
+{
+  "lecture_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+}
+```
 
-3. **Call Python Explanation Service**
+# The Full Data Flow, Step-by-Step
 
-   ```
-   POST http://python-ai/explain
-   Content-Type: application/json
+## Step 1: User Uploads a Lecture
 
-   {
-     "slide_id": "...",
-     "lecture_id":   "...",
-     "slide_number": N
-   }
-   ```
+- **Trigger:** The user selects a PDF file and clicks "Upload" in the Next.js application.
+- **Action:**
+  1.  The request, containing the PDF file, is sent to your Go API Gateway.
+  2.  The Go API immediately creates a new record in the `lectures` table with a status of `uploading`.
+  3.  It then uploads the PDF file directly to Supabase Storage in a dedicated folder for that lecture.
+  4.  Once the upload is successful, it updates the `lectures` record with the file's storage path and changes the status to `pending_processing`.
+  5.  Finally, it publishes a single message to the Google Cloud Pub/Sub topic named `ingestion`. This message contains the unique ID of the lecture, kicking off the entire automated pipeline.
 
-4. **Ack or Retry**
-   - On HTTP 200: delete message, emit success metrics.
-   - **Error Handling**: let the Go orchestrator retry with exponential backoff; on repeated failures, move the job to your DLQ, update `lectures.status = 'failed'` and set `lectures.error_message`
+## Step 2: Ingestion and Dispatch Workflow
 
----
+- **Trigger:** A message arrives from the `ingestion` topic, pushed to your Python API (`/ingestion`).
+- **Action:** This service is now a fast, mechanical dispatcher. It makes no external AI calls.
 
-### 3.4.1 Python Explanation Service
+  1.  It receives the lecture ID, **verifies the lecture exists in the database**, and updates its status to `parsing`.
+  2.  It downloads the PDF and creates an in-memory dictionary called `processed_images_map`.
+      - `processed_images_map = { image_hash -> storage_path }`
+  3.  It processes the PDF **page by page**:
 
-**Input**
+      - **Create Slide & Chunks**: Extracts raw_text, breaks it into chunks using tiktoken, and saves records to the slides and chunks tables.
+      - It renders the high-resolution, full-page image for the main slide explanation and saves its record.
+      - It finds all sub-images within the slide. For each sub-image:
+        - **a. Compute Hash:** It computes the perceptual hash of the image.
+        - **b. Check if Hash is New:** It checks if the hash exists as a key in the `processed_images_map`.
+        - **c. If the Hash is NEW:**
+          - Upload the image to storage to get a `new_storage_path`.
+          - Add the entry to the map: `processed_images_map[hash] = new_storage_path`.
+          - Create a new record in the `slide_images` table for the current slide, using the `hash` and the `new_storage_path`.
+          - **Publish one `image-analysis` job** for this new record's ID.
+        - **d. If the Hash is a DUPLICATE:**
+          - Look up the existing path from the map: `existing_path = processed_images_map[hash]`.
+          - Create a new record in the `slide_images` table for the current slide, using the `hash` and the `existing_path`.
+          - **Do NOT publish another analysis job.**
 
-- `slide_id` (UUID): The unique identifier for the slide.
-- `lecture_id` (UUID): The unique identifier for the lecture.
-- `slide_number` (integer): The number of the slide within the lecture.
+  4.  **Save Final Counts**: After the loop, it saves the final total_sub_images count (the number of unique images) to the lectures table.
+  5.  **Dispatch Explanation Jobs:** It loops through the slide data it collected and publishes a separate message to the `explanation` topic for **every single slide**.
+  6.  **Handle No-Image Case: Checks if total_sub_images == 0. If so, it publishes the embedding job directly.**
+  7.  **Finalize:** It updates the lecture status to `explaining` and returns a success signal.
 
-This service is triggered by a message on the `explanation_queue` after all text chunks for a single slide have been successfully embedded. Its goal is to generate a detailed, context-aware explanation for that slide using a Retrieval-Augmented Generation (RAG) approach.
+## Step 3: Image Analysis
 
-1.  **Gather Context**:
+- **Trigger:** An `image-analysis` message arrives (only for unique images).
+- **Action:** This handler performs the single, comprehensive AI analysis for each unique image.
+  1.  It receives the `slide_images` ID, **first verifies the associated lecture exists**, then fetches the corresponding image from storage.
+  2.  **Make One LLM Call:** It sends the image to your low-cost multi-modal LLM, asking for three pieces of information in a single, structured response: the image's `type` (`content` or `decorative`), its `ocr_text`, and its `alt_text`.
+  3.  **Propagate Results:** It runs an update query on the `slide_images` table **where the `lecture_id` and `image_hash` match**. This ensures that the analysis results are written to _every single record_ representing that unique image across all slides in the lecture.
+  4.  **The "Last Job" Logic:** In a single, atomic database transaction, it increments the `processed_sub_images` counter in the main `lectures` table and returns `processed_sub_images` and `total_sub_images`.
+  5.  **Trigger Embedding Job (If Last):** If `processed_sub_images` == `total_sub_images`, it publishes the single embedding message containing the lecture_id.
 
-    - **Recent History**: It fetches the short, one-liner summaries from the last 1-3 slides to understand the immediate context.
-    - **Current Slide Data**: It retrieves the full text and any OCR/alt-text from images on the current slide.
-    - **Related Concepts (RAG)**: It creates an embedding from the current slide's full text and uses it to perform a vector similarity search across the entire lecture. This retrieves the most relevant text chunks from other slides, providing broad, lecture-wide context.
+## Step 4: Creating Searchable Embeddings
 
-2.  **Prompt Assembly & LLM Call**: All the gathered information—recent history, current slide data, and related concepts—is assembled into a detailed prompt. It instructs the LLM to act as an AI professor and generate a clear, in-depth explanation. The LLM is asked to classify the slide's purpose (e.g., "cover", "header", "content") and return the output as a structured JSON object containing a `one_liner` summary and the full `content` in Markdown.
+- **Trigger:** The single, large message arrives from the `embedding` topic.
+- **Action:**
+  1.  It receives the `lecture_id`, **first verifies the lecture still exists**, and then queries the database to get all the `chunks` for that lecture.
+  2.  **Enrich the Text:** For each chunk, it builds a richer block of text. It looks up all images associated with the chunk's slide and **filters them to only include those where the `type` is `content`**. It then combines:
+      - The original text of the chunk.
+      - The `ocr_text` and `alt_text` from all relevant _content_ images.
+  3.  **Generate Embeddings:** It sends all of these enriched text blocks to the OpenAI Embedding API in an efficient batch request.
+  4.  **Save the Vectors:** The returned vectors are saved into the `embeddings` table, fully preparing the lecture for the future chat feature.
+  5.  **Finalize Search-Enrichment Track**: After saving the vectors, it performs one final atomic transaction:
+      - **SQL Logic**: UPDATE lectures SET embeddings_complete = TRUE WHERE id = :lecture_id RETURNING status;
+      - **Application Logic**: It receives the current_status back. If current_status == 'summarising', it knows the other track has finished, so it runs a final UPDATE to set the lecture status to complete.
 
-3.  **Persist Explanation & Update Progress**: The generated explanation and one-liner are saved to the `explanations` table. The service then atomically increments the `processed_slides` counter for the lecture.
+## Step 5: Generating Explanations
 
-4.  **Enqueue Summary Job**: If all slides for the lecture have been explained (`processed_slides` equals `total_slides`), it updates the lecture's status to `summarising` and enqueues a final job on the `summary_queue`.
+- **Trigger:** A message arrives from the `explanation` topic (one for each slide), running in parallel.
+- **Action:**
+  1.  **It first verifies the lecture exists.** It then checks if an explanation for this slide already exists and stops if it does.
+  2.  **Gather Context:** It downloads the main slide image and queries the database for the raw text of the _previous_ and _next_ slides.
+  3.  **Call the AI Professor:** It sends the slide image and the contextual text to your high-quality multi-modal LLM (like GPT-4o), asking for a detailed explanation, a one-liner summary, and the slide's purpose.
+  4.  It saves the AI's structured response to the `explanations` table.
+  5.  **Update Progress & Trigger Summary:** It safely increments the `processed_slides` counter. If this was the last slide (`processed_slides == total_slides`), it updates the lecture status to `summarising` and publishes the final message to the `summary` topic.
 
----
+## Step 6: Creating the Final Lecture Summary
 
-## 3.5. Summary Orchestrator (Go)
-
-**Trigger:** new message on `summary_queue`
-
-1. **Poll & Receive** → `{ lecture_id }`
-2. **Call Python Summary Service**
-
-   ```
-   POST http://python-ai/summarize
-   Body: { "lecture_id": … }
-
-   ```
-
-3. **Ack or Retry**
-   - On HTTP 200: delete message, emit success metrics.
-   - **Error Handling**: let the Go orchestrator retry with exponential backoff; on repeated failures, move the job to your DLQ, update `lectures.status = 'failed'` and set `lectures.error_message`
-
-### **3.5.1. Python Summary Service**
-
-**Input**
-
-- `lecture_id` (UUID): The unique identifier for the lecture.
-
-This service is triggered by a message on the `summary_queue` once all slides in a lecture have been explained.
-
-1.  **Gather All Explanations**: It retrieves all the detailed, slide-by-slide explanations from the database for the entire lecture.
-
-2.  **Build Prompt & Call LLM**: It combines all the explanations into a single, comprehensive prompt. It instructs the LLM to act as an AI professor and synthesize the information into a student-friendly "cheatsheet." The cheatsheet should start with a list of key takeaways and then provide a well-structured summary of the lecture's main topics.
-
-3.  **Persist Summary & Finalize Lecture**: The generated Markdown summary is saved to the `summaries` table. The service then updates the main lecture's status to `complete` and records a `completed_at` timestamp, marking the successful end of the entire processing pipeline.
-
-4.  **Metrics & Errors**: log token usage, cost, and fallback on over-length.
+- **Trigger:** The final message arrives from the `summary` topic.
+- **Action:**
+  1.  **It first verifies the lecture exists.** It then checks if a summary for the lecture already exists and stops if so.
+  2.  **Gather & Synthesize:** It gathers all the high-quality, slide-by-slide explanations from the database and sends them to the LLM one last time, asking it to synthesize a comprehensive "cheatsheet."
+  3.  Finalize Explanation Track: After saving the summary, it performs one final atomic transaction:
+      - **SQL Logic**: UPDATE lectures SET status = 'summarising' WHERE id = :lecture_id RETURNING embeddings_complete; (This confirms the status in case of retries).
+      - **Application Logic**: It receives the embeddings_complete flag back. If the flag is true, it knows the other track has finished, so it runs a final UPDATE to set the lecture status to complete.
