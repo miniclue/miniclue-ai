@@ -11,7 +11,7 @@ WORKDIR /app
 COPY poetry.lock pyproject.toml ./
 
 # Install dependencies
-RUN poetry install --without dev --no-interaction --no-ansi
+RUN poetry install --without dev --no-root --no-interaction --no-ansi
 
 # 2. Final stage
 FROM python:3.13-alpine
