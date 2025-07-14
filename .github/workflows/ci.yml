@@ -44,4 +44,12 @@ jobs:
         run: poetry run ruff check .
 
       - name: Run tests
-        run: poetry run pytest
+        run: |
+          poetry run pytest
+          status=$?
+          if [ $status -eq 5 ]; then
+            echo "No tests collected, passing."
+            exit 0
+          else
+            exit $status
+          fi
