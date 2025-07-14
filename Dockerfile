@@ -10,6 +10,9 @@ WORKDIR /app
 # Copy dependency files
 COPY poetry.lock pyproject.toml ./
 
+# Configure poetry to create venv in project directory
+RUN poetry config virtualenvs.in-project true
+
 # Install dependencies
 RUN poetry install --without dev --no-root --no-interaction --no-ansi
 
