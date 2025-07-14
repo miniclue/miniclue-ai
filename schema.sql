@@ -17,13 +17,6 @@ CREATE TYPE lecture_status AS ENUM (
   'failed'
 );
 
--- Refined image types for clarity in logic
-CREATE TYPE slide_image_type AS ENUM (
-  'content',
-  'decorative',
-  'full_slide_render'
-);
-
 -- Status for dead-letter queue messages
 CREATE TYPE dlq_message_status AS ENUM (
   'unprocessed',
@@ -176,7 +169,7 @@ CREATE TABLE IF NOT EXISTS slide_images (
   lecture_id     UUID        NOT NULL,
   image_hash     TEXT        NOT NULL, -- Crucial for propagation
   storage_path   TEXT        NOT NULL,
-  type           slide_image_type, -- Can be NULL until analysis is complete
+  type           TEXT, -- Can be NULL until analysis is complete
   ocr_text       TEXT,
   alt_text       TEXT,
   created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),

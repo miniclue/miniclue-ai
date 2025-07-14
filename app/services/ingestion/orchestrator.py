@@ -24,6 +24,7 @@ from app.services.ingestion.text_processing import chunk_text_by_tokens
 from app.services.ingestion.pubsub_utils import (
     publish_embedding_job,
     publish_explanation_job,
+    publish_image_analysis_job,
 )
 from app.utils.config import Settings
 
@@ -77,6 +78,7 @@ async def ingest(lecture_id: UUID, storage_path: str):
         logging.info(f"Lecture {lecture_id} status set to 'parsing'")
 
         processed_images_map: Dict[str, str] = {}
+        image_analysis_jobs = []
         for page_index in range(total_slides):
             slide_number = page_index + 1
             page = doc.load_page(page_index)
@@ -106,7 +108,7 @@ async def ingest(lecture_id: UUID, storage_path: str):
                 await render_and_upload_slide_image(
                     doc, s3_client, conn, page_index, lecture_id, slide_id
                 )
-                await process_slide_sub_images(
+                new_jobs = await process_slide_sub_images(
                     doc,
                     s3_client,
                     conn,
@@ -115,6 +117,7 @@ async def ingest(lecture_id: UUID, storage_path: str):
                     slide_id,
                     processed_images_map,
                 )
+                image_analysis_jobs.extend(new_jobs)
 
         # Post-loop operations
         total_sub_images = len(processed_images_map)
@@ -139,7 +142,17 @@ async def ingest(lecture_id: UUID, storage_path: str):
                     f"Could not find full slide image for slide_id {slide_record['id']}. Skipping explanation job."
                 )
 
-        if total_sub_images == 0:
+        if total_sub_images > 0:
+            logging.info(
+                f"Dispatching {len(image_analysis_jobs)} image analysis jobs..."
+            )
+            for job in image_analysis_jobs:
+                publish_image_analysis_job(
+                    slide_image_id=job["slide_image_id"],
+                    lecture_id=job["lecture_id"],
+                    image_hash=job["image_hash"],
+                )
+        else:
             logging.info("No sub-images found, dispatching embedding job directly.")
             publish_embedding_job(lecture_id)
 

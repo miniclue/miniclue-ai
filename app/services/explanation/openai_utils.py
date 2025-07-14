@@ -18,7 +18,7 @@ def generate_explanation(
     alt_texts: list[str],
 ) -> tuple[str, str, str, str]:
     """Build prompt, call API, and parse explanation from response."""
-    with open("app/services/explain/prompt.md", "r", encoding="utf-8") as file:
+    with open("app/services/explanation/prompt.md", "r", encoding="utf-8") as file:
         system_msg = file.read()
 
     # Prepare formatted sections
@@ -139,7 +139,7 @@ def mock_generate_explanation(
 ) -> tuple[str, str, str, str]:
     """Mock: build the full prompt and return it as content without calling the LLM API."""
     # Load system instructions
-    with open("app/services/explain/prompt.md", "r", encoding="utf-8") as file:
+    with open("app/services/explanation/prompt.md", "r", encoding="utf-8") as file:
         system_msg = file.read()
 
     # Prepare formatted sections

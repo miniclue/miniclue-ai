@@ -1,7 +1,8 @@
 import io
 import logging
+import hashlib
 from uuid import UUID
-from typing import Dict
+from typing import Dict, List
 
 import imagehash
 import pymupdf
@@ -47,7 +48,7 @@ async def render_and_upload_slide_image(
         upload_image(
             s3_client, settings.s3_bucket_name, storage_key, img_data, "image/png"
         )
-        storage_path = f"s3://{settings.s3_bucket_name}/{storage_key}"
+        storage_path = storage_key
 
         await insert_slide_image(
             conn,
@@ -75,18 +76,19 @@ async def process_slide_sub_images(
     lecture_id: UUID,
     slide_id: UUID,
     processed_images_map: Dict[str, str],
-):
+) -> List[Dict]:
     """
     Extracts all sub-images from a slide, uploads new ones, records them in the
-    database, and publishes analysis jobs for the new ones.
+    database, and returns a list of analysis jobs to be published for new images.
     """
     page = doc.load_page(page_index)
     slide_number = page_index + 1
     images = page.get_images(full=True)
+    image_analysis_jobs = []
 
     if not images:
         logging.info(f"No sub-images found on slide {slide_number}")
-        return
+        return image_analysis_jobs
 
     logging.info(
         f"Found {len(images)} sub-images on slide {slide_number}, processing..."
@@ -113,7 +115,7 @@ async def process_slide_sub_images(
                     img_bytes,
                     f"image/{ext}",
                 )
-                storage_path = f"s3://{settings.s3_bucket_name}/{storage_key}"
+                storage_path = storage_key
                 processed_images_map[image_hash] = storage_path
                 logging.info(
                     f"Uploaded new unique image with hash {image_hash} from slide {slide_number}"
@@ -130,11 +132,13 @@ async def process_slide_sub_images(
             )
 
             if is_new_image:
-                # Publish a job only for the newly uploaded image
-                publish_image_analysis_job(
-                    slide_image_id=slide_image_id,
-                    lecture_id=lecture_id,
-                    image_hash=image_hash,
+                # Append a job payload for the newly uploaded image
+                image_analysis_jobs.append(
+                    {
+                        "slide_image_id": slide_image_id,
+                        "lecture_id": lecture_id,
+                        "image_hash": image_hash,
+                    }
                 )
 
         except Exception as e:
@@ -142,3 +146,4 @@ async def process_slide_sub_images(
                 f"Failed to process sub-image with xref {xref} on slide {slide_number}: {e}"
             )
             continue
+    return image_analysis_jobs

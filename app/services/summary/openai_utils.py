@@ -10,7 +10,7 @@ client = OpenAI(api_key=settings.xai_api_key, base_url=settings.xai_api_base_url
 
 def generate_summary(slide_explanations: List[str]) -> tuple[str, str]:
     """Build prompt, call API, and parse summary from response."""
-    with open("app/services/summarize/prompt.md", "r", encoding="utf-8") as file:
+    with open("app/services/summary/prompt.md", "r", encoding="utf-8") as file:
         system_msg = file.read()
 
     explanations_str = "\n\n".join(
@@ -108,7 +108,7 @@ Only return the Markdown cheatsheet.
 
 def mock_generate_summary(slide_explanations: List[str]) -> tuple[str, str]:
     """Mock: build the full prompt and return it as content without calling the LLM API."""
-    with open("app/services/summarize/prompt.md", "r", encoding="utf-8") as file:
+    with open("app/services/summary/prompt.md", "r", encoding="utf-8") as file:
         system_msg = file.read()
 
     explanations_str = "\n\n".join(
