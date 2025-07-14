@@ -86,7 +86,7 @@ Return ONLY the raw JSON object, without any markdown formatting or explanations
             exc_info=True,
         )
         raise ValueError("Gemini response did not match the expected format.") from e
-    except Exception as e:
+    except Exception:
         logging.error(
             "An unexpected error occurred during Gemini image analysis.", exc_info=True
         )

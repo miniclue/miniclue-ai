@@ -1,6 +1,5 @@
 import io
 import logging
-import hashlib
 from uuid import UUID
 from typing import Dict, List
 
@@ -11,7 +10,6 @@ import asyncpg
 
 from app.services.ingestion.db_utils import insert_slide_image
 from app.services.ingestion.s3_utils import upload_image
-from app.services.ingestion.pubsub_utils import publish_image_analysis_job
 from app.utils.config import Settings
 
 settings = Settings()

@@ -1,5 +1,4 @@
 import logging
-import boto3
 
 
 def download_pdf(s3_client, bucket: str, key: str) -> bytes:

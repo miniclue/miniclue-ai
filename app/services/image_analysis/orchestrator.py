@@ -10,11 +10,6 @@ from app.utils.config import Settings
 
 settings = Settings()
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(levelname)s:     %(message)s",
-)
-
 
 async def process_image_analysis_job(
     slide_image_id: uuid.UUID, lecture_id: uuid.UUID, image_hash: str

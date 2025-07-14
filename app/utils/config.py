@@ -22,8 +22,9 @@ class Settings(BaseSettings):
     xai_api_key: str = ""
     xai_api_base_url: str = "https://api.x.ai/v1"
     # Gemini
-    explanation_model: str = "gemini-2.5-flash-lite-preview-06-17"
     image_analysis_model: str = "gemini-2.5-flash-lite-preview-06-17"
+    explanation_model: str = "gemini-2.5-flash-lite-preview-06-17"
+    summary_model: str = "gemini-2.5-flash-lite-preview-06-17"
     gemini_api_key: str = ""
     gemini_api_base_url: str = (
         "https://generativelanguage.googleapis.com/v1beta/openai/"

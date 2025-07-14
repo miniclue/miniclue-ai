@@ -70,7 +70,7 @@ async def process_explanation_job(payload: ExplanationPayload):
 
         # 5. Call the AI Professor
         if settings.mock_llm_calls:
-            ai_result = mock_generate_explanation(
+            result, metadata = mock_generate_explanation(
                 image_bytes,
                 payload.slide_number,
                 payload.total_slides,
@@ -78,7 +78,7 @@ async def process_explanation_job(payload: ExplanationPayload):
                 next_text,
             )
         else:
-            ai_result = await generate_explanation(
+            result, metadata = await generate_explanation(
                 image_bytes,
                 payload.slide_number,
                 payload.total_slides,
@@ -92,7 +92,8 @@ async def process_explanation_job(payload: ExplanationPayload):
             payload.slide_id,
             payload.lecture_id,
             payload.slide_number,
-            ai_result,
+            result,
+            metadata,
         )
         logging.info(f"Saved explanation for slide {payload.slide_id}")
 

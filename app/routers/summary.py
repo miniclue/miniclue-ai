@@ -4,9 +4,8 @@ from fastapi import APIRouter, HTTPException, status
 
 from app.schemas.common import PubSubRequest
 from app.schemas.summary import SummaryPayload
+from app.services.summary.orchestrator import process_summary_job
 
-# TODO: Implement the new summary service orchestrator
-# from app.services.summarize.orchestrator import process_summary_job
 
 router = APIRouter(prefix="/summary", tags=["summary"])
 
@@ -17,10 +16,12 @@ async def handle_summary_job(request: PubSubRequest):
     try:
         payload = SummaryPayload(**request.message.data)
         logging.info(f"Received summary job for lecture_id: {payload.lecture_id}")
-        # await process_summary_job(lecture_id=payload.lecture_id)
-        logging.warning("Placeholder: process_summary_job not implemented.")
+        await process_summary_job(payload)
+
     except Exception as e:
         logging.error(f"Summary job failed: {e}", exc_info=True)
+        # Re-raise as an HTTPException to signal a server-side error to Pub/Sub,
+        # which will trigger a retry. The dead-letter queue is the final backstop.
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to process summary job: {e}",

@@ -3,6 +3,7 @@ import json
 import logging
 import re
 from typing import Optional
+import uuid
 
 from openai import AsyncOpenAI
 from pydantic import ValidationError
@@ -24,7 +25,7 @@ async def generate_explanation(
     total_slides: int,
     prev_slide_text: Optional[str],
     next_slide_text: Optional[str],
-) -> ExplanationResult:
+) -> tuple[ExplanationResult, dict]:
     """
     Generates an explanation for a slide using a multi-modal LLM.
 
@@ -36,7 +37,7 @@ async def generate_explanation(
         next_slide_text: The raw text from the next slide, if available.
 
     Returns:
-        An ExplanationResult object with the structured AI response.
+        A tuple containing an ExplanationResult object and a metadata dictionary.
     """
     logging.info("Generating explanation from AI for a slide.")
 
@@ -90,7 +91,7 @@ Please provide your explanation based on the system prompt's instructions.
         try:
             # First attempt to parse the JSON directly
             data = json.loads(response_content)
-            ai_result = ExplanationResult.model_validate(data)
+            result = ExplanationResult.model_validate(data)
         except json.JSONDecodeError:
             # If parsing fails, it's often due to unescaped backslashes.
             # Attempt to fix this common error and retry parsing.
@@ -106,7 +107,7 @@ Please provide your explanation based on the system prompt's instructions.
 
             try:
                 data = json.loads(sanitized_content)
-                ai_result = ExplanationResult.model_validate(data)
+                result = ExplanationResult.model_validate(data)
                 logging.info("Successfully parsed JSON after sanitizing backslashes.")
             except (json.JSONDecodeError, ValidationError) as e:
                 logging.error(
@@ -118,7 +119,15 @@ Please provide your explanation based on the system prompt's instructions.
                 ) from e
 
         logging.info("Successfully generated and parsed explanation from AI.")
-        return ai_result
+
+        metadata = {
+            "model": response.model,
+            "usage": response.usage.model_dump() if response.usage else None,
+            "finish_reason": response.choices[0].finish_reason,
+            "response_id": response.id,
+        }
+
+        return result, metadata
 
     except ValidationError as e:
         logging.error(f"Failed to validate AI response into Pydantic model: {e}")
@@ -134,7 +143,7 @@ def mock_generate_explanation(
     total_slides: int,
     prev_slide_text: Optional[str],
     next_slide_text: Optional[str],
-) -> ExplanationResult:
+) -> tuple[ExplanationResult, dict]:
     """
     Returns a mock explanation result containing the full prompt that would have
     been sent to the AI model.
@@ -177,8 +186,18 @@ Please provide your explanation based on the system prompt's instructions.
 {user_text_prompt}
 """
 
-    return ExplanationResult(
+    result = ExplanationResult(
         explanation=full_prompt_for_debug,
         one_liner="MOCK: The full prompt that would be sent to the AI is in the main content area.",
         slide_purpose="mock_prompt_debug",
     )
+
+    metadata = {
+        "model": "mock-explanation-model",
+        "usage": {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150},
+        "finish_reason": "stop",
+        "response_id": f"mock_response_{uuid.uuid4()}",
+        "mock": True,
+    }
+
+    return result, metadata

@@ -1,6 +1,7 @@
 import logging
 from uuid import UUID
 from typing import Optional, Tuple
+import json
 
 import asyncpg
 from app.schemas.explanation import ExplanationResult
@@ -66,12 +67,13 @@ async def save_explanation(
     lecture_id: UUID,
     slide_number: int,
     result: ExplanationResult,
+    metadata: dict,
 ) -> None:
-    """Saves the AI's explanation to the 'explanations' table."""
+    """Saves the AI's explanation and metadata to the 'explanations' table."""
     await conn.execute(
         """
-        INSERT INTO explanations (slide_id, lecture_id, slide_number, content, one_liner, slide_type)
-        VALUES ($1, $2, $3, $4, $5, $6)
+        INSERT INTO explanations (slide_id, lecture_id, slide_number, content, one_liner, slide_type, metadata)
+        VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
         ON CONFLICT (slide_id) DO NOTHING
         """,
         slide_id,
@@ -80,6 +82,7 @@ async def save_explanation(
         result.explanation,
         result.one_liner,
         result.slide_purpose,
+        json.dumps(metadata),
     )
 
 

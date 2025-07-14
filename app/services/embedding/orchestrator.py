@@ -11,11 +11,6 @@ from app.utils.config import Settings
 
 settings = Settings()
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(levelname)s:     %(message)s",
-)
-
 
 async def process_embedding_job(lecture_id: UUID):
     """
