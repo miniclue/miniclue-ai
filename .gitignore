@@ -17,6 +17,7 @@ venv/
 # Test artifacts
 .pytest_cache/
 .coverage
+.ruff_cache/
 
 # IDE configuration
 .vscode/

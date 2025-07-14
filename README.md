@@ -1,6 +1,6 @@
 # AI Lecture Service
 
-A FastAPI microservice to handle AI‐driven lecture pipeline jobs (ingestion, embedding, explanation, summarization).
+A FastAPI microservice to handle AI‐driven lecture pipeline jobs (ingestion, image analysis, embedding, explanation, summarization).
 
 ## Setup
 
@@ -20,87 +20,6 @@ A FastAPI microservice to handle AI‐driven lecture pipeline jobs (ingestion, e
 
 Set the following environment variables in .env.example.
 
-## API Endpoints
-
-### Health Check
-
-**GET** `/health`
-
-Response:
-
-```json
-{ "status": "ok" }
-```
-
-### Ingest
-
-**POST** `/ingest`
-
-Payload:
-
-```json
-{ "lecture_id": "UUID", "storage_path": "string" }
-```
-
-Response:
-
-```json
-{ "status": "queued" }
-```
-
-### Embed
-
-**POST** `/embed`
-
-Payload:
-
-```json
-{
-  "chunk_id": "UUID",
-  "slide_id": "UUID",
-  "lecture_id": "UUID",
-  "slide_number": 1
-}
-```
-
-Response:
-
-```json
-{ "status": "queued" }
-```
-
-### Explain
-
-**POST** `/explain`
-
-Payload:
-
-```json
-{ "slide_id": "UUID", "lecture_id": "UUID", "slide_number": 1 }
-```
-
-Response:
-
-```json
-{ "status": "queued" }
-```
-
-### Summarize
-
-**POST** `/summarize`
-
-Payload:
-
-```json
-{ "lecture_id": "UUID" }
-```
-
-Response:
-
-```json
-{ "status": "queued" }
-```
-
 ## Testing
 
 Run tests with:
@@ -108,3 +27,24 @@ Run tests with:
 ```
 poetry run pytest
 ```
+
+## CI/CD Workflow
+
+### Staging Environment
+
+1. A developer writes code on a feature branch and opens a Pull Request to `main`.
+2. After code review and approval, the PR is merged.
+3. The merge to `main` automatically triggers a GitHub Actions workflow (`cd.yml`).
+4. This workflow builds a Docker image tagged with the commit SHA and deploys it to the **staging** environment.
+
+### Production Environment
+
+1. After changes are verified in staging, a release can be deployed to production.
+2. A developer creates and pushes a semantic version git tag (e.g., `v1.2.3`) from the `main` branch.
+   ```bash
+   # From the main branch
+   git tag -a v1.0.0 -m "Release notes"
+   git push origin v1.0.0
+   ```
+3. Pushing the tag automatically triggers the release workflow (`release.yml`).
+4. This workflow builds a Docker image tagged with the version (e.g., `v1.0.0`) and deploys it to the **production** environment.

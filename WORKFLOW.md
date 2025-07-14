@@ -171,73 +171,77 @@ The new system is designed around two parallel processing tracks that start afte
 ## Step 2: Ingestion and Dispatch Workflow
 
 - **Trigger:** A message arrives from the `ingestion` topic, pushed to your Python API (`/ingestion`).
-- **Action:** This service is now a fast, mechanical dispatcher. It makes no external AI calls.
+- **Action:** This service is a fast, mechanical dispatcher. It makes no external AI calls. Its modern implementation includes key improvements for robustness and data integrity.
 
-  1.  It receives the lecture ID, **verifies the lecture exists in the database**, and updates its status to `parsing`.
-  2.  It downloads the PDF and creates an in-memory dictionary called `processed_images_map`.
-      - `processed_images_map = { image_hash -> storage_path }`
-  3.  It processes the PDF **page by page**:
-
-      - **Create Slide & Chunks**: Extracts raw_text, breaks it into chunks using tiktoken, and saves records to the slides and chunks tables.
-      - It renders the high-resolution, full-page image for the main slide explanation and saves its record.
-      - It finds all sub-images within the slide. For each sub-image:
-        - **a. Compute Hash:** It computes the perceptual hash of the image.
-        - **b. Check if Hash is New:** It checks if the hash exists as a key in the `processed_images_map`.
-        - **c. If the Hash is NEW:**
-          - Upload the image to storage to get a `new_storage_path`.
-          - Add the entry to the map: `processed_images_map[hash] = new_storage_path`.
-          - Create a new record in the `slide_images` table for the current slide, using the `hash` and the `new_storage_path`.
-          - **Publish one `image-analysis` job** for this new record's ID.
-        - **d. If the Hash is a DUPLICATE:**
-          - Look up the existing path from the map: `existing_path = processed_images_map[hash]`.
-          - Create a new record in the `slide_images` table for the current slide, using the `hash` and the `existing_path`.
-          - **Do NOT publish another analysis job.**
-
-  4.  **Save Final Counts**: After the loop, it saves the final total_sub_images count (the number of unique images) to the lectures table.
-  5.  **Dispatch Explanation Jobs:** It loops through the slide data it collected and publishes a separate message to the `explanation` topic for **every single slide**.
-  6.  **Handle No-Image Case: Checks if total_sub_images == 0. If so, it publishes the embedding job directly.**
-  7.  **Finalize:** It updates the lecture status to `explaining` and returns a success signal.
+  1.  **Preparation**: It receives the lecture ID and connects to the database.
+  2.  **Verification & Setup**: It **verifies the lecture exists (a defensive subscriber pattern)**, and **clears any previous error details** from the `lectures` table. This ensures that retries start from a clean state. It then downloads the PDF from storage, and updates the lecture status to `parsing` while saving the total slide count.
+  3.  **Page-by-Page Processing Loop**: It processes the PDF one page at a time. Each page's processing is wrapped in its own **atomic database transaction** to ensure data integrity.
+      - **Create Slide & Chunks**: It extracts raw text and creates records for the slide and its text chunks.
+      - **Render Main Image**: It renders the high-resolution, full-page image for the main slide explanation and saves its record.
+      - **Process Sub-Images**: It finds all sub-images within the slide, computing a hash for each one.
+        - It uses an in-memory map (`processed_images_map`) to track unique images.
+        - If an image is new, it's uploaded, its details are added to the map, a new `slide_images` record is created, and an `image-analysis` job is added to an in-memory list.
+        - If an image is a duplicate, a `slide_images` record is created using the existing path, and no new job is dispatched.
+  4.  **Batch Dispatch**: After the loop finishes, it performs its dispatching operations.
+      - It saves the final count of unique sub-images (`total_sub_images`) to the `lectures` table.
+      - It publishes an `explanation` job for **every single slide**.
+      - It publishes all the collected `image-analysis` jobs at once.
+      - **Handle No-Image Case**: If `total_sub_images == 0`, it publishes the `embedding` job directly.
+  5.  **Finalize**: It updates the lecture status to `explaining`.
+  6.  **Robust Error Handling**: The entire process is wrapped in a `try/except` block. If any error occurs, the lecture status is set to `failed` with detailed error information, and the exception is re-raised to ensure the message is not lost.
 
 ## Step 3: Image Analysis
 
 - **Trigger:** An `image-analysis` message arrives (only for unique images).
-- **Action:** This handler performs the single, comprehensive AI analysis for each unique image.
-  1.  It receives the `slide_images` ID, **first verifies the associated lecture exists**, then fetches the corresponding image from storage.
-  2.  **Make One LLM Call:** It sends the image to your low-cost multi-modal LLM, asking for three pieces of information in a single, structured response: the image's `type` (`content` or `decorative`), its `ocr_text`, and its `alt_text`.
-  3.  **Propagate Results:** It runs an update query on the `slide_images` table **where the `lecture_id` and `image_hash` match**. This ensures that the analysis results are written to _every single record_ representing that unique image across all slides in the lecture.
-  4.  **The "Last Job" Logic:** In a single, atomic database transaction, it increments the `processed_sub_images` counter in the main `lectures` table and returns `processed_sub_images` and `total_sub_images`.
-  5.  **Trigger Embedding Job (If Last):** If `processed_sub_images` == `total_sub_images`, it publishes the single embedding message containing the lecture_id.
+- **Action:** This handler performs a single AI analysis for each unique image, with improved observability and transaction management.
+
+  1.  **Verification**: It receives the `slide_images` ID, **first verifies the associated lecture exists**, then fetches the corresponding image from storage.
+  2.  **Make One LLM Call**: It sends the image to a multi-modal LLM, asking for the image's `type` (`content` or `decorative`), its `ocr_text`, and its `alt_text`. The implementation also includes a **mocking flag** to bypass the real LLM call for testing.
+  3.  **Atomic Updates**: It uses a **tightly-scoped, atomic database transaction** for all write operations to ensure data consistency and minimize lock times.
+      - **Propagate Results:** It runs an `UPDATE` query on the `slide_images` table **where the `lecture_id` and `image_hash` match**. This ensures the analysis is written to every record representing that unique image.
+      - **The "Last Job" Logic:** It increments the `processed_sub_images` counter in the main `lectures` table.
+  4.  **Trigger Embedding Job (If Last):** After the transaction is successfully committed, it checks if `processed_sub_images == total_sub_images`. If they match, it publishes the single `embedding` message.
+  5.  **Granular Error Handling**: If an error occurs, it is caught, and a structured JSON error object is written to a dedicated `search_error_details` field in the `lectures` table before the exception is re-raised to trigger a Pub/Sub retry.
 
 ## Step 4: Creating Searchable Embeddings
 
-- **Trigger:** The single, large message arrives from the `embedding` topic.
-- **Action:**
-  1.  It receives the `lecture_id`, **first verifies the lecture still exists**, and then queries the database to get all the `chunks` for that lecture.
-  2.  **Enrich the Text:** For each chunk, it builds a richer block of text. It looks up all images associated with the chunk's slide and **filters them to only include those where the `type` is `content`**. It then combines:
-      - The original text of the chunk.
-      - The `ocr_text` and `alt_text` from all relevant _content_ images.
-  3.  **Generate Embeddings:** It sends all of these enriched text blocks to the OpenAI Embedding API in an efficient batch request.
-  4.  **Save the Vectors:** The returned vectors are saved into the `embeddings` table, fully preparing the lecture for the future chat feature.
-  5.  **Finalize Search-Enrichment Track**: After saving the vectors, it performs one final atomic transaction:
-      - **SQL Logic**: UPDATE lectures SET embeddings_complete = TRUE WHERE id = :lecture_id RETURNING status;
-      - **Application Logic**: It receives the current_status back. If current_status == 'summarising', it knows the other track has finished, so it runs a final UPDATE to set the lecture status to complete.
+- **Trigger:** The single message arrives from the `embedding` topic.
+- **Action:** This service is highly optimized for performance and correctness.
+
+  1.  **Verification**: It receives the `lecture_id` and **verifies the lecture still exists**.
+  2.  **Efficient Data Fetching**: It queries the database to get all `chunks` and all content-rich `slide_images` for the entire lecture in **two efficient, bulk queries**, avoiding the N+1 problem. It then uses an in-memory dictionary for fast lookups.
+  3.  **Handle No-Text Case**: It gracefully handles the edge case where a lecture contains no text chunks, logs a warning, and proceeds to finalize the track to unblock the pipeline.
+  4.  **Enrich the Text**: For each chunk, it builds a richer block of text by combining the original chunk text with the `ocr_text` and `alt_text` from its associated content images. It adds explicit labels like `"OCR Text:"` to provide better semantic context for the embedding model.
+  5.  **Generate Embeddings**: It sends all enriched text blocks to the OpenAI Embedding API in an efficient batch request. A mocking flag is also supported.
+  6.  **Atomic Finalization**: The entire finalization process occurs within a **single atomic transaction**.
+      - **Batch Upsert**: The returned vectors are saved to the `embeddings` table using a **performant batch `UPSERT` operation**, which is both fast and idempotent.
+      - **Finalize Search-Enrichment Track**: It sets `embeddings_complete = TRUE` and retrieves the lecture's current `status`.
+      - **Rendezvous Check**: If the `status` is already `summarising`, it knows the other track has finished, so it runs a final `UPDATE` to set the lecture status to `complete`.
+  7.  **Error Handling**: On failure, the lecture status is set to `failed` with error details.
 
 ## Step 5: Generating Explanations
 
 - **Trigger:** A message arrives from the `explanation` topic (one for each slide), running in parallel.
-- **Action:**
-  1.  **It first verifies the lecture exists.** It then checks if an explanation for this slide already exists and stops if it does.
-  2.  **Gather Context:** It downloads the main slide image and queries the database for the raw text of the _previous_ and _next_ slides.
-  3.  **Call the AI Professor:** It sends the slide image and the contextual text to your high-quality multi-modal LLM (like GPT-4o), asking for a detailed explanation, a one-liner summary, and the slide's purpose.
-  4.  It saves the AI's structured response to the `explanations` table.
-  5.  **Update Progress & Trigger Summary:** It safely increments the `processed_slides` counter. If this was the last slide (`processed_slides == total_slides`), it updates the lecture status to `summarising` and publishes the final message to the `summary` topic.
+- **Action:** This service is designed for idempotency and clear separation of concerns.
+
+  1.  **Verification**: **It first verifies the lecture exists** and then checks if an explanation for this slide already exists, skipping if it does to ensure idempotency.
+  2.  **Gather Context**: It downloads the main slide image and queries the database for the raw text of the _previous_ and _next_ slides.
+  3.  **Call the AI Professor**: It sends the slide image and context to a high-quality multi-modal LLM. This also supports a mocking flag for testing.
+  4.  **Save Results**: It saves the AI's structured response to the `explanations` table.
+  5.  **Atomic Progress Update & Trigger**: In a **single atomic database operation**, it increments the `processed_slides` counter and checks if this was the last slide.
+      - If it was the last slide, it **only publishes the final message to the `summary` topic**. It does _not_ change the lecture's status itself, deferring that responsibility to the summary service for better resilience.
+  6.  **Track-Specific Error Handling**: On failure, it writes a structured error to a dedicated `explanation_error_details` field, allowing for clear distinction between failures in the explanation track versus the search track.
 
 ## Step 6: Creating the Final Lecture Summary
 
 - **Trigger:** The final message arrives from the `summary` topic.
-- **Action:**
-  1.  **It first verifies the lecture exists.** It then checks if a summary for the lecture already exists and stops if so.
-  2.  **Gather & Synthesize:** It gathers all the high-quality, slide-by-slide explanations from the database and sends them to the LLM one last time, asking it to synthesize a comprehensive "cheatsheet."
-  3.  Finalize Explanation Track: After saving the summary, it performs one final atomic transaction:
-      - **SQL Logic**: UPDATE lectures SET status = 'summarising' WHERE id = :lecture_id RETURNING embeddings_complete; (This confirms the status in case of retries).
-      - **Application Logic**: It receives the embeddings_complete flag back. If the flag is true, it knows the other track has finished, so it runs a final UPDATE to set the lecture status to complete.
+- **Action:** This service acts as the final arbiter of the explanation track and the overall lecture status.
+
+  1.  **Verification**: **It first verifies the lecture exists** and checks if a summary already exists to ensure idempotency. It also gracefully handles the case where no explanations were found for the lecture.
+  2.  **Gather & Synthesize**: It gathers all the slide-by-slide explanations and sends them to the LLM to synthesize a comprehensive "cheatsheet."
+  3.  **Atomic Finalization**: The final database updates occur within a **single atomic transaction**:
+      - It saves the summary to the database.
+      - It idempotently updates the lecture `status` to `summarising`.
+      - It then fetches the `embeddings_complete` flag to see if the other track is finished.
+  4.  **Final Rendezvous**: After the transaction commits, it checks the `embeddings_complete` flag. If `true`, it knows the other track has finished, so it runs a final `UPDATE` to set the lecture `status` to `complete`.
+  5.  **Error Handling**: On failure, it re-raises the exception to leverage Pub/Sub's automatic retry mechanism. If all retries fail, the message is sent to the dead-letter queue for manual inspection.
