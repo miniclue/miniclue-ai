@@ -78,6 +78,8 @@ jobs:
             EMBEDDING_MODEL=${{ secrets.EMBEDDING_MODEL }}
             EXPLANATION_MODEL=${{ secrets.EXPLANATION_MODEL }}
             SUMMARY_MODEL=${{ secrets.SUMMARY_MODEL }}
+            PUBSUB_BASE_URL=${{ secrets.PUBSUB_BASE_URL }}
+            PUBSUB_SERVICE_ACCOUNT_EMAIL=${{ secrets.PUBSUB_SERVICE_ACCOUNT_EMAIL }}
 
       - name: Show Cloud Run URL
         run: echo "Deployed to ${{ steps.deploy.outputs.url }}"

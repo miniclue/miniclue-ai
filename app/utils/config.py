@@ -2,19 +2,25 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    # App Environment
     app_env: str = "prod"
+    # S3
     s3_access_key: str = ""
     s3_secret_key: str = ""
     s3_bucket_name: str = ""
     s3_endpoint_url: str = ""
+    # Postgres
     postgres_dsn: str = ""
-    # Pub/Sub Topics
+    # GCP
     gcp_project_id: str = ""
     ingestion_topic: str = ""
     image_analysis_topic: str | None = None
     explanation_topic: str | None = None
     summary_topic: str | None = None
     embedding_topic: str | None = None
+    # Pub/Sub
+    pubsub_base_url: str = ""
+    pubsub_service_account_email: str = ""
     # OpenAI
     openai_api_key: str = ""
     openai_api_base_url: str = "https://api.openai.com/v1"
@@ -38,7 +44,5 @@ class Settings(BaseSettings):
     port: int = 8000
     # Pub/Sub Emulator
     pubsub_emulator_host: str = ""
-    pubsub_base_url: str = ""
-    pubsub_service_account_email: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")

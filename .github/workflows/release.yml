@@ -62,6 +62,8 @@ jobs:
             OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
             XAI_API_KEY=${{ secrets.XAI_API_KEY }}
             GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
+            PUBSUB_BASE_URL=${{ secrets.PUBSUB_BASE_URL }}
+            PUBSUB_SERVICE_ACCOUNT_EMAIL=${{ secrets.PUBSUB_SERVICE_ACCOUNT_EMAIL }}
 
       - name: Show Cloud Run URL
         run: echo "Deployed to ${{ steps.deploy.outputs.url }}"
