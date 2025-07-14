@@ -1,13 +1,18 @@
 import logging
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Depends
 
 from app.schemas.common import PubSubRequest
 from app.schemas.summary import SummaryPayload
 from app.services.summary.orchestrator import process_summary_job
+from app.utils.auth import verify_token
 
 
-router = APIRouter(prefix="/summary", tags=["summary"])
+router = APIRouter(
+    prefix="/summary",
+    tags=["summary"],
+    dependencies=[Depends(verify_token)],
+)
 
 
 @router.post("", status_code=status.HTTP_204_NO_CONTENT)

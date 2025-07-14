@@ -1,12 +1,17 @@
 import logging
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Depends
 
 from app.schemas.common import PubSubRequest
 from app.schemas.ingestion import IngestionPayload
 from app.services.ingestion.orchestrator import ingest
+from app.utils.auth import verify_token
 
-router = APIRouter(prefix="/ingestion", tags=["ingestion"])
+router = APIRouter(
+    prefix="/ingestion",
+    tags=["ingestion"],
+    dependencies=[Depends(verify_token)],
+)
 
 
 @router.post("", status_code=status.HTTP_204_NO_CONTENT)

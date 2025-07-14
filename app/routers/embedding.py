@@ -1,13 +1,18 @@
 import logging
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Depends
 
 from app.schemas.common import PubSubRequest
 from app.schemas.embedding import EmbeddingPayload
 from app.services.embedding.orchestrator import process_embedding_job
+from app.utils.auth import verify_token
 
 
-router = APIRouter(prefix="/embedding", tags=["embedding"])
+router = APIRouter(
+    prefix="/embedding",
+    tags=["embedding"],
+    dependencies=[Depends(verify_token)],
+)
 
 
 @router.post("", status_code=status.HTTP_204_NO_CONTENT)

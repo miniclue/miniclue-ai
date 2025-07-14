@@ -2,6 +2,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    app_env: str = "prod"
     s3_access_key: str = ""
     s3_secret_key: str = ""
     s3_bucket_name: str = ""
@@ -37,5 +38,7 @@ class Settings(BaseSettings):
     port: int = 8000
     # Pub/Sub Emulator
     pubsub_emulator_host: str = ""
+    pubsub_base_url: str = ""
+    pubsub_service_account_email: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
