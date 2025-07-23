@@ -42,10 +42,14 @@ async def process_summary_job(payload: SummaryPayload):
         )
 
         if settings.mock_llm_calls:
-            summary_content, metadata = openai_utils.mock_generate_summary(explanations)
+            summary_content, metadata = openai_utils.mock_generate_summary(
+                explanations,
+                str(lecture_id),
+            )
         else:
             summary_content, metadata = await openai_utils.generate_summary(
-                explanations
+                explanations,
+                str(lecture_id),
             )
 
         # 5. Atomically save summary, update status, and check for rendezvous

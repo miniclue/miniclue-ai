@@ -10,11 +10,14 @@ from app.utils.config import Settings
 settings = Settings()
 
 client = AsyncOpenAI(
-    api_key=settings.openai_api_key, base_url=settings.openai_api_base_url
+    api_key=settings.openai_api_key,
+    base_url=settings.openai_api_base_url,
 )
 
 
-async def generate_embeddings(texts: List[str]) -> List[Dict[str, Any]]:
+async def generate_embeddings(
+    texts: List[str], lecture_id: str
+) -> List[Dict[str, Any]]:
     """
     Generate embedding vectors for a batch of text chunks.
     """
@@ -24,6 +27,13 @@ async def generate_embeddings(texts: List[str]) -> List[Dict[str, Any]]:
     response = await client.embeddings.create(
         model=settings.embedding_model,
         input=texts,
+        extra_body={
+            "metadata": {
+                "environment": settings.app_env,
+                "service": "embedding",
+                "lecture_id": lecture_id,
+            }
+        },
     )
 
     results = []
@@ -38,7 +48,7 @@ async def generate_embeddings(texts: List[str]) -> List[Dict[str, Any]]:
     return results
 
 
-def mock_generate_embeddings(texts: List[str]) -> List[Dict[str, Any]]:
+def mock_generate_embeddings(texts: List[str], lecture_id: str) -> List[Dict[str, Any]]:
     """
     Mock embedding function for development.
     Returns a list of fake embedding vectors and metadata.
@@ -59,5 +69,7 @@ def mock_generate_embeddings(texts: List[str]) -> List[Dict[str, Any]]:
         }
         results.append({"vector": vector_str, "metadata": json.dumps(metadata)})
 
-    logging.info(f"Mock embeddings generated for {len(texts)} texts.")
+    logging.info(
+        f"Mock embeddings generated for {len(texts)} texts (lecture_id={lecture_id})."
+    )
     return results

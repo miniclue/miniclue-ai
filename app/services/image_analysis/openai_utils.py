@@ -14,12 +14,14 @@ from app.utils.config import Settings
 # Initialize settings and client at the module level
 settings = Settings()
 client = AsyncOpenAI(
-    api_key=settings.gemini_api_key, base_url=settings.gemini_api_base_url
+    api_key=settings.keywordsai_api_key, base_url=settings.keywordsai_proxy_base_url
 )
 
 
 async def analyze_image(
     image_bytes: bytes,
+    lecture_id: str,
+    slide_image_id: str,
 ) -> ImageAnalysisResult:
     """
     Analyzes an image using the Gemini API
@@ -43,19 +45,30 @@ async def analyze_image(
             model=settings.image_analysis_model,
             messages=[
                 {
+                    "role": "system",
+                    "content": system_prompt,
+                },
+                {
                     "role": "user",
                     "content": [
-                        {"type": "text", "text": system_prompt},
                         {
                             "type": "image_url",
                             "image_url": {"url": data_url},
                         },
                     ],
-                }
+                },
             ],
             max_tokens=1024,
             temperature=0.1,
             response_format={"type": "json_object"},
+            extra_body={
+                "metadata": {
+                    "environment": settings.app_env,
+                    "service": "image_analysis",
+                    "lecture_id": lecture_id,
+                    "slide_image_id": slide_image_id,
+                }
+            },
         )
 
         response_text = response.choices[0].message.content
@@ -103,7 +116,9 @@ async def analyze_image(
         raise
 
 
-def mock_analyze_image(image_bytes: bytes) -> ImageAnalysisResult:
+def mock_analyze_image(
+    image_bytes: bytes, lecture_id: str, slide_image_id: str
+) -> ImageAnalysisResult:
     """
     Mock function for image analysis for development and testing.
     """

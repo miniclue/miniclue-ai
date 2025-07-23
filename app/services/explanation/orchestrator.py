@@ -76,6 +76,8 @@ async def process_explanation_job(payload: ExplanationPayload):
                 payload.total_slides,
                 prev_text,
                 next_text,
+                str(payload.lecture_id),
+                str(payload.slide_id),
             )
         else:
             result, metadata = await generate_explanation(
@@ -84,6 +86,8 @@ async def process_explanation_job(payload: ExplanationPayload):
                 payload.total_slides,
                 prev_text,
                 next_text,
+                str(payload.lecture_id),
+                str(payload.slide_id),
             )
 
         # 6. Save the structured response

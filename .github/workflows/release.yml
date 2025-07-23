@@ -59,9 +59,9 @@ jobs:
             EXPLANATION_TOPIC=${{ secrets.EXPLANATION_TOPIC }}
             SUMMARY_TOPIC=${{ secrets.SUMMARY_TOPIC }}
             EMBEDDING_TOPIC=${{ secrets.EMBEDDING_TOPIC }}
+            KEYWORDSAI_API_KEY=${{ secrets.KEYWORDSAI_API_KEY }}
+            KEYWORDSAI_PROXY_BASE_URL=${{ secrets.KEYWORDSAI_PROXY_BASE_URL }}
             OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
-            XAI_API_KEY=${{ secrets.XAI_API_KEY }}
-            GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
             PUBSUB_BASE_URL=${{ secrets.PUBSUB_BASE_URL }}
             PUBSUB_SERVICE_ACCOUNT_EMAIL=${{ secrets.PUBSUB_SERVICE_ACCOUNT_EMAIL }}
 

@@ -15,7 +15,7 @@ from app.utils.config import Settings
 # Initialize OpenAI client
 settings = Settings()
 client = AsyncOpenAI(
-    api_key=settings.gemini_api_key, base_url=settings.gemini_api_base_url
+    api_key=settings.keywordsai_api_key, base_url=settings.keywordsai_proxy_base_url
 )
 
 
@@ -25,6 +25,8 @@ async def generate_explanation(
     total_slides: int,
     prev_slide_text: Optional[str],
     next_slide_text: Optional[str],
+    lecture_id: str,
+    slide_id: str,
 ) -> tuple[ExplanationResult, dict]:
     """
     Generates an explanation for a slide using a multi-modal LLM.
@@ -82,6 +84,15 @@ Please provide your explanation based on the system prompt's instructions.
             response_format={"type": "json_object"},
             temperature=0.7,
             max_tokens=2048,
+            extra_body={
+                "metadata": {
+                    "environment": settings.app_env,
+                    "service": "explanation",
+                    "lecture_id": lecture_id,
+                    "slide_id": slide_id,
+                    "slide_number": slide_number,
+                }
+            },
         )
 
         response_content = response.choices[0].message.content
@@ -143,6 +154,8 @@ def mock_generate_explanation(
     total_slides: int,
     prev_slide_text: Optional[str],
     next_slide_text: Optional[str],
+    lecture_id: str,
+    slide_id: str,
 ) -> tuple[ExplanationResult, dict]:
     """
     Returns a mock explanation result containing the full prompt that would have
@@ -200,4 +213,12 @@ Please provide your explanation based on the system prompt's instructions.
         "mock": True,
     }
 
+    metadata.update(
+        {
+            "environment": settings.app_env,
+            "service": "explanation",
+            "lecture_id": lecture_id,
+            "slide_id": slide_id,
+        }
+    )
     return result, metadata
