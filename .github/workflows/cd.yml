@@ -60,6 +60,7 @@ jobs:
           flags: "--allow-unauthenticated"
           env_vars: |
             ENV=staging
+            APP_ENV=staging
             S3_ACCESS_KEY=${{ secrets.S3_ACCESS_KEY }}
             S3_SECRET_KEY=${{ secrets.S3_SECRET_KEY }}
             S3_BUCKET_NAME=${{ secrets.S3_BUCKET_NAME }}
