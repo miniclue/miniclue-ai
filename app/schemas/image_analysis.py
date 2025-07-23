@@ -1,11 +1,15 @@
 from uuid import UUID
 from pydantic import BaseModel, Field
+from typing import Optional
 
 
 class ImageAnalysisPayload(BaseModel):
     slide_image_id: UUID
     lecture_id: UUID
     image_hash: str
+    customer_identifier: str
+    name: Optional[str] = None
+    email: Optional[str] = None
 
 
 class ImageAnalysisResult(BaseModel):

@@ -1,6 +1,6 @@
-from uuid import UUID
 import logging
 from typing import Dict
+from app.schemas.ingestion import IngestionPayload
 
 import asyncpg
 import boto3
@@ -33,7 +33,14 @@ from app.utils.config import Settings
 settings = Settings()
 
 
-async def ingest(lecture_id: UUID, storage_path: str):
+async def ingest(
+    payload: IngestionPayload,
+):
+    lecture_id = payload.lecture_id
+    storage_path = payload.storage_path
+    customer_identifier = payload.customer_identifier
+    name = payload.name
+    email = payload.email
     """
     Ingestion and Dispatch Workflow:
     - Parses a PDF into slides, text chunks, and images.
@@ -141,6 +148,9 @@ async def ingest(lecture_id: UUID, storage_path: str):
                     slide_number=slide_record["slide_number"],
                     total_slides=total_slides,
                     slide_image_path=slide_image_path,
+                    customer_identifier=customer_identifier,
+                    name=name,
+                    email=email,
                 )
             else:
                 logging.warning(
@@ -156,10 +166,18 @@ async def ingest(lecture_id: UUID, storage_path: str):
                     slide_image_id=job["slide_image_id"],
                     lecture_id=job["lecture_id"],
                     image_hash=job["image_hash"],
+                    customer_identifier=customer_identifier,
+                    name=name,
+                    email=email,
                 )
         else:
             logging.info("No sub-images found, dispatching embedding job directly.")
-            publish_embedding_job(lecture_id)
+            publish_embedding_job(
+                lecture_id,
+                customer_identifier=customer_identifier,
+                name=name,
+                email=email,
+            )
 
         # Finalize
         await update_lecture_status(conn, lecture_id, "explaining")

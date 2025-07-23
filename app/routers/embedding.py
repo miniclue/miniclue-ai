@@ -21,7 +21,7 @@ async def handle_embedding_job(request: PubSubRequest):
     try:
         payload = EmbeddingPayload(**request.message.data)
         logging.info(f"Processing embedding job for lecture_id: {payload.lecture_id}")
-        await process_embedding_job(lecture_id=payload.lecture_id)
+        await process_embedding_job(payload)
     except Exception as e:
         logging.error(f"Embedding job failed: {e}", exc_info=True)
         # Re-raise as an HTTPException to ensure Pub/Sub receives a failure response

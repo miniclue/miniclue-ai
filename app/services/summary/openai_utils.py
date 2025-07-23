@@ -2,6 +2,7 @@ import logging
 from openai import AsyncOpenAI
 from app.utils.config import Settings
 import uuid
+from typing import Optional
 
 # Initialize OpenAI client
 settings = Settings()
@@ -15,6 +16,9 @@ client = AsyncOpenAI(
 async def generate_summary(
     explanations: list[str],
     lecture_id: str,
+    customer_identifier: str,
+    name: Optional[str] = None,
+    email: Optional[str] = None,
 ) -> tuple[str, dict]:
     """
     Generates a comprehensive lecture summary using an AI model.
@@ -55,7 +59,12 @@ async def generate_summary(
                     "environment": settings.app_env,
                     "service": "summary",
                     "lecture_id": lecture_id,
-                }
+                },
+                "customer_params": {
+                    "customer_identifier": customer_identifier,
+                    "name": name,
+                    "email": email,
+                },
             },
         )
         summary = response.choices[0].message.content

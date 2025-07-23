@@ -27,6 +27,9 @@ async def generate_explanation(
     next_slide_text: Optional[str],
     lecture_id: str,
     slide_id: str,
+    customer_identifier: str,
+    name: Optional[str] = None,
+    email: Optional[str] = None,
 ) -> tuple[ExplanationResult, dict]:
     """
     Generates an explanation for a slide using a multi-modal LLM.
@@ -91,7 +94,12 @@ Please provide your explanation based on the system prompt's instructions.
                     "lecture_id": lecture_id,
                     "slide_id": slide_id,
                     "slide_number": slide_number,
-                }
+                },
+                "customer_params": {
+                    "customer_identifier": customer_identifier,
+                    "name": name,
+                    "email": email,
+                },
             },
         )
 

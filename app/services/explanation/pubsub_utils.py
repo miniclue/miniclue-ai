@@ -1,6 +1,7 @@
 import json
 import logging
 from uuid import UUID
+from typing import Optional
 
 from google.cloud import pubsub_v1
 
@@ -17,9 +18,14 @@ else:
     publisher = pubsub_v1.PublisherClient()
 
 
-def publish_summary_job(lecture_id: UUID):
+def publish_summary_job(
+    lecture_id: UUID,
+    customer_identifier: str,
+    name: Optional[str],
+    email: Optional[str],
+):
     """
-    Publishes a job to the summary topic.
+    Publishes a job to the summary topic with customer tracking.
     """
     if not settings.summary_topic:
         logging.warning("SUMMARY_TOPIC not set, skipping summary job submission.")
@@ -30,7 +36,14 @@ def publish_summary_job(lecture_id: UUID):
         raise ValueError("GCP_PROJECT_ID is not configured.")
 
     topic_path = publisher.topic_path(settings.gcp_project_id, settings.summary_topic)
-    message_data = json.dumps({"lecture_id": str(lecture_id)}).encode("utf-8")
+    message_data = json.dumps(
+        {
+            "lecture_id": str(lecture_id),
+            "customer_identifier": customer_identifier,
+            "name": name,
+            "email": email,
+        }
+    ).encode("utf-8")
 
     try:
         future = publisher.publish(topic_path, message_data)

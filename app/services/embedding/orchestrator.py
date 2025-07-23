@@ -1,18 +1,19 @@
 import logging
-from uuid import UUID
 from collections import defaultdict
 import json
 
 import asyncpg
 
 from app.services.embedding import db_utils
+from app.schemas.embedding import EmbeddingPayload
 from app.services.embedding import openai_utils
 from app.utils.config import Settings
 
 settings = Settings()
 
 
-async def process_embedding_job(lecture_id: UUID):
+async def process_embedding_job(payload: EmbeddingPayload):
+    lecture_id = payload.lecture_id
     """
     Orchestrates the embedding process for an entire lecture.
     """

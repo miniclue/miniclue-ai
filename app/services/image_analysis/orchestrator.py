@@ -1,5 +1,4 @@
 import logging
-import uuid
 import json
 
 import asyncpg
@@ -7,12 +6,13 @@ import boto3
 
 from app.services.image_analysis import db_utils, openai_utils, s3_utils, pubsub_utils
 from app.utils.config import Settings
+from app.schemas.image_analysis import ImageAnalysisPayload
 
 settings = Settings()
 
 
 async def process_image_analysis_job(
-    slide_image_id: uuid.UUID, lecture_id: uuid.UUID, image_hash: str
+    payload: ImageAnalysisPayload,
 ):
     """
     Orchestrates the analysis of a single unique slide image.
@@ -22,6 +22,13 @@ async def process_image_analysis_job(
     4. Atomically increments the processed image counter for the lecture.
     5. If it's the last image, triggers the embedding job.
     """
+    slide_image_id = payload.slide_image_id
+    lecture_id = payload.lecture_id
+    image_hash = payload.image_hash
+    customer_identifier = payload.customer_identifier
+    name = payload.name
+    email = payload.email
+
     logging.info(
         f"Starting image analysis for slide_image_id={slide_image_id}, "
         f"lecture_id={lecture_id}, image_hash={image_hash}"
@@ -72,6 +79,9 @@ async def process_image_analysis_job(
                 image_bytes=image_bytes,
                 lecture_id=str(lecture_id),
                 slide_image_id=str(slide_image_id),
+                customer_identifier=customer_identifier,
+                name=name,
+                email=email,
             )
 
         # Use a transaction for the final updates to ensure atomicity
@@ -97,7 +107,12 @@ async def process_image_analysis_job(
                 f"All {total_count} images for lecture {lecture_id} have been processed. "
                 "Triggering embedding job."
             )
-            pubsub_utils.publish_embedding_job(lecture_id)
+            pubsub_utils.publish_embedding_job(
+                lecture_id,
+                customer_identifier=customer_identifier,
+                name=name,
+                email=email,
+            )
         else:
             logging.info(
                 f"Processed {processed_count}/{total_count} images for lecture {lecture_id}."

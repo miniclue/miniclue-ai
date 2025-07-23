@@ -4,6 +4,7 @@ import logging
 import re
 from io import BytesIO
 from PIL import Image
+from typing import Optional
 
 from openai import AsyncOpenAI
 from pydantic import ValidationError
@@ -22,6 +23,9 @@ async def analyze_image(
     image_bytes: bytes,
     lecture_id: str,
     slide_image_id: str,
+    customer_identifier: str,
+    name: Optional[str] = None,
+    email: Optional[str] = None,
 ) -> ImageAnalysisResult:
     """
     Analyzes an image using the Gemini API
@@ -67,7 +71,12 @@ async def analyze_image(
                     "service": "image_analysis",
                     "lecture_id": lecture_id,
                     "slide_image_id": slide_image_id,
-                }
+                },
+                "customer_params": {
+                    "customer_identifier": customer_identifier,
+                    "name": name,
+                    "email": email,
+                },
             },
         )
 

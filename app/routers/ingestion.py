@@ -20,7 +20,7 @@ async def handle_ingestion_job(request: PubSubRequest):
     try:
         payload = IngestionPayload(**request.message.data)
         logging.info(f"Received ingestion job for lecture_id: {payload.lecture_id}")
-        await ingest(lecture_id=payload.lecture_id, storage_path=payload.storage_path)
+        await ingest(payload)
     except Exception as e:
         logging.error(f"Ingestion job failed: {e}", exc_info=True)
         # Re-raise to be caught by the global exception handler

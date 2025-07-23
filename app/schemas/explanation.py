@@ -1,5 +1,6 @@
 from uuid import UUID
 from pydantic import BaseModel, Field
+from typing import Optional
 
 
 class ExplanationPayload(BaseModel):
@@ -8,6 +9,9 @@ class ExplanationPayload(BaseModel):
     slide_number: int
     total_slides: int
     slide_image_path: str
+    customer_identifier: str
+    name: Optional[str] = None
+    email: Optional[str] = None
 
 
 class ExplanationResult(BaseModel):

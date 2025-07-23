@@ -109,50 +109,65 @@ The new system is designed around two parallel processing tracks that start afte
 
 # Format of messages in topics
 
-1.  ingestion
+1. ingestion
 
-```
-  {
+```json
+{
   "lecture_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-  "storage_path": "lectures/55bdef4b-b9ac-4783-b8e4-87b47675333e/original.pdf"
-  }
+  "storage_path": "lectures/55bdef4b-b9ac-4783-b8e4-87b47675333e/original.pdf",
+  "customer_identifier": "customer_1",
+  "name": "Hendrix Liu",
+  "email": "hendrix@keywordsai.co"
+}
 ```
 
 2. image-analysis
 
-```
+```json
 {
-"slide_image_id": "f1e2d3c4-b5a6-7890-fedc-ba0987654321",
-"lecture_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-"image_hash": "b432a1098fedcba"
+  "slide_image_id": "f1e2d3c4-b5a6-7890-fedc-ba0987654321",
+  "lecture_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "image_hash": "b432a1098fedcba",
+  "customer_identifier": "customer_1",
+  "name": "Hendrix Liu",
+  "email": "hendrix@keywordsai.co"
 }
 ```
 
 3. embedding
 
-```
+```json
 {
-  "lecture_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+  "lecture_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "customer_identifier": "customer_1",
+  "name": "Hendrix Liu",
+  "email": "hendrix@keywordsai.co"
 }
 ```
 
 4. explanation
 
-```
+```json
 {
-"lecture_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-"slide_id": "c1b2a398-d4e5-f678-90ab-cdef12345678",
-"slide_number": 5,
-"total_slides": 30,
-"slide_image_path": "lectures/a1b2.../slides/5.png"
+  "lecture_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "slide_id": "c1b2a398-d4e5-f678-90ab-cdef12345678",
+  "slide_number": 5,
+  "total_slides": 30,
+  "slide_image_path": "lectures/a1b2.../slides/5.png",
+  "customer_identifier": "customer_1",
+  "name": "Hendrix Liu",
+  "email": "hendrix@keywordsai.co"
 }
 ```
 
-5. summmary
+5. summary
 
-```
+```json
 {
-  "lecture_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+  "lecture_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "customer_identifier": "customer_1",
+  "name": "Hendrix Liu",
+  "email": "hendrix@keywordsai.co"
 }
 ```
 

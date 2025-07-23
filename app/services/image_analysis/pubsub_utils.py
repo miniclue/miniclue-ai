@@ -1,6 +1,7 @@
 import json
 import logging
 from uuid import UUID
+from typing import Optional
 
 from google.cloud import pubsub_v1
 
@@ -35,10 +36,20 @@ def _publish_message(topic_name: str, data: dict):
         raise
 
 
-def publish_embedding_job(lecture_id: UUID):
-    """Publishes a job to the embedding topic."""
+def publish_embedding_job(
+    lecture_id: UUID,
+    customer_identifier: str,
+    name: Optional[str],
+    email: Optional[str],
+):
+    """Publishes a job to the embedding topic with customer tracking."""
     if not settings.embedding_topic:
         logging.warning("EMBEDDING_TOPIC not set, skipping job submission.")
         return
-    data = {"lecture_id": str(lecture_id)}
+    data = {
+        "lecture_id": str(lecture_id),
+        "customer_identifier": customer_identifier,
+        "name": name,
+        "email": email,
+    }
     _publish_message(settings.embedding_topic, data)

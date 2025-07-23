@@ -50,6 +50,9 @@ async def process_summary_job(payload: SummaryPayload):
             summary_content, metadata = await openai_utils.generate_summary(
                 explanations,
                 str(lecture_id),
+                payload.customer_identifier,
+                payload.name,
+                payload.email,
             )
 
         # 5. Atomically save summary, update status, and check for rendezvous

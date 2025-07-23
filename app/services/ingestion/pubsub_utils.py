@@ -1,6 +1,7 @@
 import json
 import logging
 from uuid import UUID
+from typing import Optional
 
 from google.cloud import pubsub_v1
 
@@ -38,8 +39,15 @@ def _publish_message(topic_name: str, data: dict):
         raise
 
 
-def publish_image_analysis_job(slide_image_id: UUID, lecture_id: UUID, image_hash: str):
-    """Publishes a job to the image-analysis topic."""
+def publish_image_analysis_job(
+    slide_image_id: UUID,
+    lecture_id: UUID,
+    image_hash: str,
+    customer_identifier: str,
+    name: Optional[str],
+    email: Optional[str],
+):
+    """Publishes a job to the image-analysis topic with customer tracking."""
     if not settings.image_analysis_topic:
         logging.warning("IMAGE_ANALYSIS_TOPIC not set, skipping job submission.")
         return
@@ -47,6 +55,9 @@ def publish_image_analysis_job(slide_image_id: UUID, lecture_id: UUID, image_has
         "slide_image_id": str(slide_image_id),
         "lecture_id": str(lecture_id),
         "image_hash": image_hash,
+        "customer_identifier": customer_identifier,
+        "name": name,
+        "email": email,
     }
     _publish_message(settings.image_analysis_topic, data)
 
@@ -57,8 +68,11 @@ def publish_explanation_job(
     slide_number: int,
     total_slides: int,
     slide_image_path: str,
+    customer_identifier: str,
+    name: Optional[str],
+    email: Optional[str],
 ):
-    """Publishes a job to the explanation topic."""
+    """Publishes a job to the explanation topic with customer tracking."""
     if not settings.explanation_topic:
         logging.warning("EXPLANATION_TOPIC not set, skipping job submission.")
         return
@@ -68,14 +82,27 @@ def publish_explanation_job(
         "slide_number": slide_number,
         "total_slides": total_slides,
         "slide_image_path": slide_image_path,
+        "customer_identifier": customer_identifier,
+        "name": name,
+        "email": email,
     }
     _publish_message(settings.explanation_topic, data)
 
 
-def publish_embedding_job(lecture_id: UUID):
-    """Publishes a job to the embedding topic."""
+def publish_embedding_job(
+    lecture_id: UUID,
+    customer_identifier: str,
+    name: Optional[str],
+    email: Optional[str],
+):
+    """Publishes a job to the embedding topic with customer tracking."""
     if not settings.embedding_topic:
         logging.warning("EMBEDDING_TOPIC not set, skipping job submission.")
         return
-    data = {"lecture_id": str(lecture_id)}
+    data = {
+        "lecture_id": str(lecture_id),
+        "customer_identifier": customer_identifier,
+        "name": name,
+        "email": email,
+    }
     _publish_message(settings.embedding_topic, data)

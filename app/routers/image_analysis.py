@@ -23,11 +23,7 @@ async def handle_image_analysis_job(request: PubSubRequest):
         logging.info(
             f"Processing image analysis job for image_hash: {payload.image_hash}"
         )
-        await process_image_analysis_job(
-            slide_image_id=payload.slide_image_id,
-            lecture_id=payload.lecture_id,
-            image_hash=payload.image_hash,
-        )
+        await process_image_analysis_job(payload)
     except Exception as e:
         logging.error(f"Image analysis job failed: {e}", exc_info=True)
         raise HTTPException(
