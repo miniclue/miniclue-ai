@@ -18,6 +18,22 @@ else:
     publisher = pubsub_v1.PublisherClient()
 
 
+def _publish_message(topic_name: str, data: dict):
+    """Helper function to publish a message to a Pub/Sub topic."""
+    if not settings.gcp_project_id:
+        logging.error("GCP_PROJECT_ID is not set. Cannot publish message.")
+        return
+    topic_path = publisher.topic_path(settings.gcp_project_id, topic_name)
+    message_data = json.dumps(data).encode("utf-8")
+    try:
+        future = publisher.publish(topic_path, message_data)
+        message_id = future.result()
+        logging.info(f"Published message {message_id} to {topic_path}.")
+    except Exception as e:
+        logging.error(f"Failed to publish message to {topic_path}: {e}")
+        raise
+
+
 def publish_summary_job(
     lecture_id: UUID,
     customer_identifier: str,
@@ -30,27 +46,10 @@ def publish_summary_job(
     if not settings.summary_topic:
         logging.warning("SUMMARY_TOPIC not set, skipping summary job submission.")
         return
-
-    if not settings.gcp_project_id:
-        logging.error("GCP_PROJECT_ID is not set. Cannot publish message.")
-        raise ValueError("GCP_PROJECT_ID is not configured.")
-
-    topic_path = publisher.topic_path(settings.gcp_project_id, settings.summary_topic)
-    message_data = json.dumps(
-        {
-            "lecture_id": str(lecture_id),
-            "customer_identifier": customer_identifier,
-            "name": name,
-            "email": email,
-        }
-    ).encode("utf-8")
-
-    try:
-        future = publisher.publish(topic_path, message_data)
-        message_id = future.result()
-        logging.info(
-            f"Published summary job for lecture {lecture_id}, message_id: {message_id}"
-        )
-    except Exception as e:
-        logging.error(f"Failed to publish summary job for lecture {lecture_id}: {e}")
-        raise
+    data = {
+        "lecture_id": str(lecture_id),
+        "customer_identifier": customer_identifier,
+        "name": name,
+        "email": email,
+    }
+    _publish_message(settings.summary_topic, data)
