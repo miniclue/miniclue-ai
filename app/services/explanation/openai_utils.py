@@ -5,18 +5,15 @@ import re
 from typing import Optional
 import uuid
 
-from openai import AsyncOpenAI
 from pydantic import ValidationError
 
 from app.schemas.explanation import ExplanationResult
 from app.utils.config import Settings
+from app.utils.posthog_client import posthog_gemini_client
 
 
-# Initialize OpenAI client
+# Initialize settings
 settings = Settings()
-client = AsyncOpenAI(
-    api_key=settings.keywordsai_api_key, base_url=settings.keywordsai_proxy_base_url
-)
 
 
 async def generate_explanation(
@@ -78,7 +75,7 @@ Please provide your explanation based on the system prompt's instructions.
     ]
 
     try:
-        response = await client.chat.completions.create(
+        response = await posthog_gemini_client.chat.completions.create(
             model=settings.explanation_model,
             messages=[
                 {"role": "system", "content": system_prompt},
@@ -87,19 +84,16 @@ Please provide your explanation based on the system prompt's instructions.
             response_format={"type": "json_object"},
             temperature=0.7,
             max_tokens=2048,
-            extra_body={
-                "metadata": {
-                    "environment": settings.app_env,
-                    "service": "explanation",
-                    "lecture_id": lecture_id,
-                    "slide_id": slide_id,
-                    "slide_number": slide_number,
-                },
-                "customer_params": {
-                    "customer_identifier": customer_identifier,
-                    "name": name,
-                    "email": email,
-                },
+            posthog_distinct_id=customer_identifier,
+            posthog_trace_id=lecture_id,
+            posthog_properties={
+                "service": "explanation",
+                "lecture_id": lecture_id,
+                "slide_id": slide_id,
+                "slide_number": slide_number,
+                "total_slides": total_slides,
+                "customer_name": name,
+                "customer_email": email,
             },
         )
 
@@ -107,9 +101,33 @@ Please provide your explanation based on the system prompt's instructions.
         if not response_content:
             raise ValueError("Received an empty response from the AI model.")
 
+        # Clean the response content to extract JSON from markdown code blocks if present
+        cleaned_content = response_content.strip()
+
+        # Check if the response is wrapped in markdown code blocks
+        if cleaned_content.startswith("```json"):
+            # Extract content between ```json and ```
+            start_marker = "```json"
+            end_marker = "```"
+            start_idx = cleaned_content.find(start_marker) + len(start_marker)
+            end_idx = cleaned_content.rfind(end_marker)
+            if start_idx > len(start_marker) - 1 and end_idx > start_idx:
+                cleaned_content = cleaned_content[start_idx:end_idx].strip()
+                logging.info("Extracted JSON from markdown code block.")
+
+        elif cleaned_content.startswith("```"):
+            # Extract content between ``` and ```
+            start_marker = "```"
+            end_marker = "```"
+            start_idx = cleaned_content.find(start_marker) + len(start_marker)
+            end_idx = cleaned_content.rfind(end_marker)
+            if start_idx > len(start_marker) - 1 and end_idx > start_idx:
+                cleaned_content = cleaned_content[start_idx:end_idx].strip()
+                logging.info("Extracted JSON from generic markdown code block.")
+
         try:
             # First attempt to parse the JSON directly
-            data = json.loads(response_content)
+            data = json.loads(cleaned_content)
             result = ExplanationResult.model_validate(data)
         except json.JSONDecodeError:
             # If parsing fails, it's often due to unescaped backslashes.
@@ -120,9 +138,7 @@ Please provide your explanation based on the system prompt's instructions.
 
             # This regex finds backslashes that are NOT followed by a valid JSON escape character
             # (", \, /, b, f, n, r, t, u) and properly escapes them.
-            sanitized_content = re.sub(
-                r'\\([^"\\/bfnrtu])', r"\\\\\1", response_content
-            )
+            sanitized_content = re.sub(r'\\([^"\\/bfnrtu])', r"\\\\\1", cleaned_content)
 
             try:
                 data = json.loads(sanitized_content)

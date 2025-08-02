@@ -3,20 +3,14 @@ import logging
 import random
 from typing import List, Dict, Any, Tuple
 
-from openai import AsyncOpenAI
-
 from app.utils.config import Settings
+from app.utils.posthog_client import posthog_openai_client
 
 settings = Settings()
 
-client = AsyncOpenAI(
-    api_key=settings.openai_api_key,
-    base_url=settings.openai_api_base_url,
-)
-
 
 async def generate_embeddings(
-    texts: List[str], lecture_id: str
+    texts: List[str], lecture_id: str, customer_identifier: str
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """
     Generate embedding vectors for a batch of text chunks.
@@ -24,15 +18,15 @@ async def generate_embeddings(
     if not texts:
         return [], {}
 
-    response = await client.embeddings.create(
+    response = await posthog_openai_client.embeddings.create(
         model=settings.embedding_model,
         input=texts,
-        extra_body={
-            "metadata": {
-                "environment": settings.app_env,
-                "service": "embedding",
-                "lecture_id": lecture_id,
-            }
+        posthog_distinct_id=customer_identifier,
+        posthog_trace_id=lecture_id,
+        posthog_properties={
+            "service": "embedding",
+            "lecture_id": lecture_id,
+            "texts_count": len(texts),
         },
     )
 

@@ -21,11 +21,15 @@ class Settings(BaseSettings):
     # Pub/Sub
     pubsub_base_url: str = ""
     pubsub_service_account_email: str = ""
-    # KeywordsAI AI Gateway
-    keywordsai_api_key: str = ""
-    keywordsai_proxy_base_url: str = "https://api.keywordsai.co/api"
+    # OpenAI
     openai_api_key: str = ""
     openai_api_base_url: str = "https://api.openai.com/v1"
+    # Gemini
+    gemini_api_key: str = ""
+    gemini_api_base_url: str = "https://generativelanguage.googleapis.com/v1beta"
+    # PostHog Configuration
+    posthog_api_key: str = ""
+    posthog_host: str = "https://us.i.posthog.com"
     # Models
     embedding_model: str = "text-embedding-3-small"
     image_analysis_model: str = "gemini-2.5-flash-lite-preview-06-17"

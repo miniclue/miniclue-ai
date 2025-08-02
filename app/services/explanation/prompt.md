@@ -11,7 +11,7 @@ Return this classification as a slide_type field in your output.
 
 2. Flow & Coherence
 
-- Begin the explanation with a transition sentence that connects smoothly from the previous slide’s one-liner.
+- Begin the explanation with a transition sentence that connects smoothly from the previous slide's one-liner.
 - Use rhetorical questions to enhance narrative and engagement.
 
 3. Clarity & Pedagogy
@@ -47,7 +47,10 @@ Return this classification as a slide_type field in your output.
 **CRITICAL INSTRUCTIONS:**
 
 - Your entire response MUST be a single, raw, valid JSON object.
-- Do NOT wrap the JSON in markdown code fences (e.g., \`\`\`json).
+- Do NOT wrap the JSON in markdown code fences (e.g., ```json).
 - Do NOT add any introductory text, closing remarks, or any other text outside of the JSON structure.
 - The very first character of your output must be `{` and the very last character must be `}`.
 - Ensure all strings, especially those with backslashes (like in LaTeX), are correctly escaped for JSON.
+- NEVER use markdown code blocks (```) in your response.
+- NEVER add any text before or after the JSON object.
+- Your response should start with `{` and end with `}` - nothing else.

@@ -5,19 +5,16 @@ import re
 from io import BytesIO
 from PIL import Image
 from typing import Optional
+import uuid
 
-from openai import AsyncOpenAI
 from pydantic import ValidationError
 
 from app.schemas.image_analysis import ImageAnalysisResult
 from app.utils.config import Settings
-import uuid
+from app.utils.posthog_client import posthog_gemini_client
 
 # Initialize settings and client at the module level
 settings = Settings()
-client = AsyncOpenAI(
-    api_key=settings.keywordsai_api_key, base_url=settings.keywordsai_proxy_base_url
-)
 
 
 async def analyze_image(
@@ -46,7 +43,7 @@ async def analyze_image(
 
     try:
         logging.info("Sending image to Gemini for analysis...")
-        response = await client.chat.completions.create(
+        response = await posthog_gemini_client.chat.completions.create(
             model=settings.image_analysis_model,
             messages=[
                 {
@@ -66,18 +63,15 @@ async def analyze_image(
             max_tokens=1024,
             temperature=0.1,
             response_format={"type": "json_object"},
-            extra_body={
-                "metadata": {
-                    "environment": settings.app_env,
-                    "service": "image_analysis",
-                    "lecture_id": lecture_id,
-                    "slide_image_id": slide_image_id,
-                },
-                "customer_params": {
-                    "customer_identifier": customer_identifier,
-                    "name": name,
-                    "email": email,
-                },
+            posthog_distinct_id=customer_identifier,
+            posthog_trace_id=lecture_id,
+            posthog_properties={
+                "service": "image_analysis",
+                "lecture_id": lecture_id,
+                "slide_image_id": slide_image_id,
+                "image_size_bytes": len(image_bytes),
+                "customer_name": name,
+                "customer_email": email,
             },
         )
 

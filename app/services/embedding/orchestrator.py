@@ -76,6 +76,7 @@ async def process_embedding_job(payload: EmbeddingPayload):
             embedding_results, metadata = await openai_utils.generate_embeddings(
                 enriched_texts,
                 str(lecture_id),
+                payload.customer_identifier,
             )
         # Log LLM call for embedding using the returned metadata
         try:

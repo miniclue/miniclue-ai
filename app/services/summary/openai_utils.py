@@ -1,16 +1,12 @@
 import logging
-from openai import AsyncOpenAI
-from app.utils.config import Settings
 import uuid
 from typing import Optional
 
-# Initialize OpenAI client
+from app.utils.config import Settings
+from app.utils.posthog_client import posthog_gemini_client
+
+# Initialize settings
 settings = Settings()
-# Note: The summary service uses the OpenAI API, whereas other services might use different providers.
-# This is consistent with the config variables available.
-client = AsyncOpenAI(
-    api_key=settings.keywordsai_api_key, base_url=settings.keywordsai_proxy_base_url
-)
 
 
 async def generate_summary(
@@ -46,7 +42,7 @@ async def generate_summary(
     prompt = prompt_template.format(explanations=formatted_explanations)
 
     try:
-        response = await client.chat.completions.create(
+        response = await posthog_gemini_client.chat.completions.create(
             model=settings.summary_model,
             messages=[
                 {"role": "system", "content": "You are an expert academic assistant."},
@@ -54,17 +50,14 @@ async def generate_summary(
             ],
             temperature=0.3,
             n=1,
-            extra_body={
-                "metadata": {
-                    "environment": settings.app_env,
-                    "service": "summary",
-                    "lecture_id": lecture_id,
-                },
-                "customer_params": {
-                    "customer_identifier": customer_identifier,
-                    "name": name,
-                    "email": email,
-                },
+            posthog_distinct_id=customer_identifier,
+            posthog_trace_id=lecture_id,
+            posthog_properties={
+                "service": "summary",
+                "lecture_id": lecture_id,
+                "explanations_count": len(explanations),
+                "customer_name": name,
+                "customer_email": email,
             },
         )
         summary = response.choices[0].message.content
