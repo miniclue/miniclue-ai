@@ -1,7 +1,7 @@
 import logging
 import asyncpg
 from app.schemas.summary import SummaryPayload
-from app.services.summary import db_utils, openai_utils
+from app.services.summary import db_utils, llm_utils
 from app.utils.config import Settings
 from app.utils.llm_db_utils import log_llm_call, compute_cost
 
@@ -45,12 +45,12 @@ async def process_summary_job(payload: SummaryPayload):
 
         # 5. Call the AI model to synthesize the explanations into a summary
         if settings.mock_llm_calls:
-            summary_content, metadata = openai_utils.mock_generate_summary(
+            summary_content, metadata = llm_utils.mock_generate_summary(
                 explanations,
                 str(lecture_id),
             )
         else:
-            summary_content, metadata = await openai_utils.generate_summary(
+            summary_content, metadata = await llm_utils.generate_summary(
                 explanations,
                 str(lecture_id),
                 payload.customer_identifier,

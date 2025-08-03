@@ -11,7 +11,7 @@ from app.services.explanation.db_utils import (
     save_explanation,
     increment_progress_and_check_completion,
 )
-from app.services.explanation.openai_utils import (
+from app.services.explanation.llm_utils import (
     generate_explanation,
     mock_generate_explanation,
 )
@@ -30,15 +30,35 @@ async def _record_explanation_error(
     slide_id,
     error_message: str,
 ) -> None:
-    """Record explanation error details into the lectures table."""
+    """Record explanation error details into the lectures table, appending to existing errors."""
     error_info = {
         "service": "explanation",
         "slide_id": str(slide_id),
         "error": str(error_message),
+        "timestamp": str(conn.get_server_tid()),
     }
+
+    # Get existing error details and append new error
+    existing_errors = await conn.fetchval(
+        "SELECT explanation_error_details FROM lectures WHERE id = $1",
+        lecture_id,
+    )
+
+    if existing_errors:
+        # If existing errors exist, append to them
+        if isinstance(existing_errors, list):
+            error_list = existing_errors
+        else:
+            # If it's a single error object, convert to list
+            error_list = [existing_errors]
+        error_list.append(error_info)
+    else:
+        # If no existing errors, create new list
+        error_list = [error_info]
+
     await conn.execute(
         "UPDATE lectures SET explanation_error_details = $1::jsonb, updated_at = NOW() WHERE id = $2",
-        json.dumps(error_info),
+        json.dumps(error_list),
         lecture_id,
     )
 
@@ -113,9 +133,27 @@ async def process_explanation_job(payload: ExplanationPayload):
                     name,
                     email,
                 )
+
+                # Check if this was a fallback response
+                if metadata.get("fallback"):
+                    logging.warning(
+                        f"Used fallback response for slide {slide_id} due to JSON parsing issues"
+                    )
+                    # Still save the fallback response but mark it appropriately
+                    metadata["fallback_reason"] = metadata.get(
+                        "error", "Unknown JSON parsing error"
+                    )
+
             except ValueError as e:
                 logging.error(
                     f"JSON decoding error for slide {slide_id}: {e}", exc_info=True
+                )
+                await _record_explanation_error(conn, lecture_id, slide_id, e)
+                return
+            except Exception as e:
+                logging.error(
+                    f"Unexpected error during explanation generation for slide {slide_id}: {e}",
+                    exc_info=True,
                 )
                 await _record_explanation_error(conn, lecture_id, slide_id, e)
                 return

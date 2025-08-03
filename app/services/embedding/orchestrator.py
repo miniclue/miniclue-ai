@@ -6,7 +6,7 @@ import asyncpg
 
 from app.services.embedding import db_utils
 from app.schemas.embedding import EmbeddingPayload
-from app.services.embedding import openai_utils
+from app.services.embedding import llm_utils
 from app.utils.config import Settings
 from app.utils.llm_db_utils import log_llm_call, compute_cost
 
@@ -67,12 +67,12 @@ async def process_embedding_job(payload: EmbeddingPayload):
 
         # 4. Generate embeddings in a batch, capturing metadata
         if settings.mock_llm_calls:
-            embedding_results, metadata = openai_utils.mock_generate_embeddings(
+            embedding_results, metadata = llm_utils.mock_generate_embeddings(
                 enriched_texts,
                 str(lecture_id),
             )
         else:
-            embedding_results, metadata = await openai_utils.generate_embeddings(
+            embedding_results, metadata = await llm_utils.generate_embeddings(
                 enriched_texts,
                 str(lecture_id),
                 payload.customer_identifier,

@@ -4,7 +4,7 @@ import json
 import asyncpg
 import boto3
 
-from app.services.image_analysis import db_utils, openai_utils, s3_utils, pubsub_utils
+from app.services.image_analysis import db_utils, llm_utils, s3_utils, pubsub_utils
 from app.utils.config import Settings
 from app.schemas.image_analysis import ImageAnalysisPayload
 from app.utils.llm_db_utils import log_llm_call, compute_cost
@@ -65,13 +65,13 @@ async def process_image_analysis_job(
         # 4. Analyze image with OpenAI
         # Perform image analysis and capture metadata
         if settings.mock_llm_calls:
-            analysis_result, metadata = openai_utils.mock_analyze_image(
+            analysis_result, metadata = llm_utils.mock_analyze_image(
                 image_bytes,
                 str(lecture_id),
                 str(slide_image_id),
             )
         else:
-            analysis_result, metadata = await openai_utils.analyze_image(
+            analysis_result, metadata = await llm_utils.analyze_image(
                 image_bytes=image_bytes,
                 lecture_id=str(lecture_id),
                 slide_image_id=str(slide_image_id),
