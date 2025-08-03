@@ -42,7 +42,6 @@ async def analyze_image(
     data_url = f"data:{image_mime_type};base64,{base64_image}"
 
     try:
-        logging.info("Sending image to Gemini for analysis...")
         response = await posthog_gemini_client.chat.completions.create(
             model=settings.image_analysis_model,
             messages=[
@@ -79,8 +78,6 @@ async def analyze_image(
         if not response_text:
             raise ValueError("Received empty response from Gemini.")
 
-        logging.info("Received analysis from Gemini.")
-
         # Strip markdown code fences if present
         if response_text.startswith("```json"):
             response_text = re.sub(
@@ -96,7 +93,6 @@ async def analyze_image(
             sanitized_text = re.sub(r'\\([^"\\/bfnrtu])', r"\\\\\1", response_text)
             try:
                 analysis_data = json.loads(sanitized_text)
-                logging.info("Successfully parsed JSON after sanitizing backslashes.")
             except json.JSONDecodeError as e:
                 logging.error(
                     f"Still failed to parse JSON after sanitizing: {sanitized_text}",
@@ -134,7 +130,6 @@ def mock_analyze_image(
     """
     Mock function for image analysis for development and testing.
     """
-    logging.info(f"Mocking image analysis for image of size {len(image_bytes)} bytes.")
     # Create a mock result and metadata for testing
     result = ImageAnalysisResult(
         type="content",

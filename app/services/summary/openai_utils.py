@@ -22,7 +22,6 @@ async def generate_summary(
     Returns:
         A tuple containing the summary string and a metadata dictionary.
     """
-    logging.info("Generating summary from AI for a lecture.")
 
     # Load system prompt
     try:
@@ -90,7 +89,6 @@ def mock_generate_summary(
     Returns a mock summary result containing the full prompt that would have
     been sent to the AI model, following the pattern from other services.
     """
-    logging.info("Generating MOCK summary with full prompt for a lecture.")
 
     # Load system prompt
     try:

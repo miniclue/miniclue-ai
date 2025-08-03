@@ -1,5 +1,4 @@
 import json
-import logging
 import random
 from typing import List, Dict, Any, Tuple
 
@@ -78,7 +77,4 @@ def mock_generate_embeddings(
         },
         "mock": True,
     }
-    logging.info(
-        f"Mock embeddings generated for {len(texts)} texts (lecture_id={lecture_id})."
-    )
     return results, common_metadata

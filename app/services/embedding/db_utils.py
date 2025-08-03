@@ -85,7 +85,6 @@ async def batch_upsert_embeddings(
         """,
         insert_data,
     )
-    logging.info(f"Successfully upserted {len(embeddings)} embeddings.")
 
 
 async def set_embeddings_complete(
@@ -115,4 +114,3 @@ async def set_lecture_status_to_complete(conn: asyncpg.Connection, lecture_id: U
         """,
         lecture_id,
     )
-    logging.info(f"Lecture {lecture_id} status set to 'complete'.")

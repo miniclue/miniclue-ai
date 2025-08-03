@@ -30,11 +30,6 @@ async def process_image_analysis_job(
     name = payload.name
     email = payload.email
 
-    logging.info(
-        f"Starting image analysis for slide_image_id={slide_image_id}, "
-        f"lecture_id={lecture_id}, image_hash={image_hash}"
-    )
-
     # Initialize clients
     if not settings.postgres_dsn:
         logging.error("Database settings are not configured.")
@@ -50,7 +45,6 @@ async def process_image_analysis_job(
 
     try:
         conn = await asyncpg.connect(settings.postgres_dsn, statement_cache_size=0)
-        logging.info("Established connections to DB.")
 
         # 1. Verify lecture exists (Defensive Subscriber)
         if not await db_utils.verify_lecture_exists(conn, lecture_id):
@@ -130,19 +124,11 @@ async def process_image_analysis_job(
 
         # 7. Trigger embedding job if all images are processed
         if total_count > 0 and processed_count == total_count:
-            logging.info(
-                f"All {total_count} images for lecture {lecture_id} have been processed. "
-                "Triggering embedding job."
-            )
             pubsub_utils.publish_embedding_job(
                 lecture_id,
                 customer_identifier=customer_identifier,
                 name=name,
                 email=email,
-            )
-        else:
-            logging.info(
-                f"Processed {processed_count}/{total_count} images for lecture {lecture_id}."
             )
 
     except Exception as e:
@@ -166,8 +152,3 @@ async def process_image_analysis_job(
     finally:
         if conn:
             await conn.close()
-            logging.info("Postgres connection closed.")
-
-    logging.info(
-        f"Successfully finished image analysis for slide_image_id={slide_image_id}"
-    )

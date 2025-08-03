@@ -19,7 +19,6 @@ async def handle_ingestion_job(request: PubSubRequest):
     """Handles an ingestion job request from Pub/Sub."""
     try:
         payload = IngestionPayload(**request.message.data)
-        logging.info(f"Received ingestion job for lecture_id: {payload.lecture_id}")
         await ingest(payload)
     except Exception as e:
         logging.error(f"Ingestion job failed: {e}", exc_info=True)

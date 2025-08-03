@@ -48,9 +48,6 @@ async def ingest(
     - Dispatches jobs for image analysis and slide explanations via Pub/Sub.
     - Does NOT make any external AI calls.
     """
-    logging.info(
-        f"Starting ingestion for lecture_id={lecture_id}, storage_path={storage_path}"
-    )
 
     if not settings.postgres_dsn:
         logging.error("Postgres DSN not configured")
@@ -66,7 +63,6 @@ async def ingest(
     conn = None
     try:
         conn = await asyncpg.connect(settings.postgres_dsn, statement_cache_size=0)
-        logging.info("Postgres connection established")
 
         # Verify the lecture exists before proceeding (Defensive Subscriber)
         if not await verify_lecture_exists(conn, lecture_id):
@@ -84,17 +80,14 @@ async def ingest(
         pdf_bytes = download_pdf(s3_client, settings.s3_bucket_name, storage_path)
         doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
         total_slides = doc.page_count
-        logging.info(f"PDF opened, total slides: {total_slides}")
 
         await set_lecture_parsing(conn, lecture_id, total_slides)
-        logging.info(f"Lecture {lecture_id} status set to 'parsing'")
 
         processed_images_map: Dict[str, str] = {}
         image_analysis_jobs = []
         for page_index in range(total_slides):
             slide_number = page_index + 1
             page = doc.load_page(page_index)
-            logging.info(f"Processing slide {slide_number}/{total_slides}")
 
             async with conn.transaction():
                 raw_text = page.get_text("text")
@@ -104,7 +97,6 @@ async def ingest(
 
                 # 2. Create text chunks
                 chunks = chunk_text_by_tokens(raw_text)
-                logging.info(f"Slide {slide_number}: Created {len(chunks)} text chunks")
                 for idx, (text_chunk, token_count) in enumerate(chunks):
                     await get_or_create_chunk(
                         conn,
@@ -134,11 +126,12 @@ async def ingest(
         # Post-loop operations
         total_sub_images = len(processed_images_map)
         await update_lecture_sub_image_count(conn, lecture_id, total_sub_images)
-        logging.info(f"Found {total_sub_images} unique sub-images in total.")
+
+        # Set status to 'explaining' BEFORE publishing jobs to prevent race conditions
+        await update_lecture_status(conn, lecture_id, "explaining")
 
         # Dispatch explanation jobs for every slide
         slides_for_jobs = await get_slides_with_images_for_lecture(conn, lecture_id)
-        logging.info(f"Dispatching {len(slides_for_jobs)} explanation jobs...")
         for slide_record in slides_for_jobs:
             slide_image_path = slide_record["slide_image_path"]
             if slide_image_path:
@@ -158,9 +151,6 @@ async def ingest(
                 )
 
         if total_sub_images > 0:
-            logging.info(
-                f"Dispatching {len(image_analysis_jobs)} image analysis jobs..."
-            )
             for job in image_analysis_jobs:
                 publish_image_analysis_job(
                     slide_image_id=job["slide_image_id"],
@@ -171,7 +161,6 @@ async def ingest(
                     email=email,
                 )
         else:
-            logging.info("No sub-images found, dispatching embedding job directly.")
             publish_embedding_job(
                 lecture_id,
                 customer_identifier=customer_identifier,
@@ -179,9 +168,7 @@ async def ingest(
                 email=email,
             )
 
-        # Finalize
-        await update_lecture_status(conn, lecture_id, "explaining")
-        logging.info(f"Lecture {lecture_id} status updated to 'explaining'.")
+        # Finalize - status is already set above
 
     except Exception as e:
         logging.error(f"Ingestion failed for lecture {lecture_id}: {e}", exc_info=True)
@@ -194,6 +181,3 @@ async def ingest(
     finally:
         if conn:
             await conn.close()
-            logging.info("Postgres connection closed")
-
-    logging.info(f"Finished ingestion for lecture_id={lecture_id}")

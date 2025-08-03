@@ -29,8 +29,7 @@ def _publish_message(topic_name: str, data: dict):
 
     try:
         future = publisher.publish(topic_path, message_data)
-        message_id = future.result()
-        logging.info(f"Published message {message_id} to {topic_path}.")
+        future.result()  # Wait for the message to be published
     except Exception as e:
         logging.error(f"Failed to publish message to {topic_path}: {e}")
         raise

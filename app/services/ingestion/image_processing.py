@@ -56,7 +56,6 @@ async def render_and_upload_slide_image(
             storage_path=storage_path,
             image_type="full_slide_render",
         )
-        logging.info(f"Uploaded full rendered image for slide {slide_number}")
 
     except Exception as e:
         logging.error(
@@ -85,12 +84,8 @@ async def process_slide_sub_images(
     image_analysis_jobs = []
 
     if not images:
-        logging.info(f"No sub-images found on slide {slide_number}")
         return image_analysis_jobs
 
-    logging.info(
-        f"Found {len(images)} sub-images on slide {slide_number}, processing..."
-    )
     for img_ref in images:
         xref = img_ref[0]
         try:
@@ -115,9 +110,6 @@ async def process_slide_sub_images(
                 )
                 storage_path = storage_key
                 processed_images_map[image_hash] = storage_path
-                logging.info(
-                    f"Uploaded new unique image with hash {image_hash} from slide {slide_number}"
-                )
 
             # Create a record for this image instance on this specific slide
             slide_image_id = await insert_slide_image(

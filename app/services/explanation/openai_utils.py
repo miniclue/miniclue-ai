@@ -41,7 +41,6 @@ async def generate_explanation(
     Returns:
         A tuple containing an ExplanationResult object and a metadata dictionary.
     """
-    logging.info("Generating explanation from AI for a slide.")
 
     # Encode image to base64
     base64_image = base64.b64encode(slide_image_bytes).decode("utf-8")
@@ -113,7 +112,6 @@ Please provide your explanation based on the system prompt's instructions.
             end_idx = cleaned_content.rfind(end_marker)
             if start_idx > len(start_marker) - 1 and end_idx > start_idx:
                 cleaned_content = cleaned_content[start_idx:end_idx].strip()
-                logging.info("Extracted JSON from markdown code block.")
 
         elif cleaned_content.startswith("```"):
             # Extract content between ``` and ```
@@ -123,7 +121,6 @@ Please provide your explanation based on the system prompt's instructions.
             end_idx = cleaned_content.rfind(end_marker)
             if start_idx > len(start_marker) - 1 and end_idx > start_idx:
                 cleaned_content = cleaned_content[start_idx:end_idx].strip()
-                logging.info("Extracted JSON from generic markdown code block.")
 
         try:
             # First attempt to parse the JSON directly
@@ -143,7 +140,6 @@ Please provide your explanation based on the system prompt's instructions.
             try:
                 data = json.loads(sanitized_content)
                 result = ExplanationResult.model_validate(data)
-                logging.info("Successfully parsed JSON after sanitizing backslashes.")
             except (json.JSONDecodeError, ValidationError) as e:
                 logging.error(
                     f"Still failed to parse JSON after sanitizing: {sanitized_content}",
@@ -152,8 +148,6 @@ Please provide your explanation based on the system prompt's instructions.
                 raise ValueError(
                     f"Failed to decode JSON from AI response even after sanitizing: {e}"
                 ) from e
-
-        logging.info("Successfully generated and parsed explanation from AI.")
 
         metadata = {
             "model": response.model,
@@ -185,7 +179,6 @@ def mock_generate_explanation(
     Returns a mock explanation result containing the full prompt that would have
     been sent to the AI model.
     """
-    logging.info("Generating MOCK explanation with full prompt for a slide.")
 
     # Load system prompt
     try:

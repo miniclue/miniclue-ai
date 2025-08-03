@@ -18,7 +18,6 @@ async def process_embedding_job(payload: EmbeddingPayload):
     """
     Orchestrates the embedding process for an entire lecture.
     """
-    logging.info(f"Starting embedding process for lecture_id={lecture_id}")
     if not settings.postgres_dsn:
         logging.error("Postgres DSN not configured")
         raise RuntimeError("Postgres DSN not configured")
@@ -138,8 +137,6 @@ async def process_embedding_job(payload: EmbeddingPayload):
             if current_status == "summarising":
                 await db_utils.set_lecture_status_to_complete(conn, lecture_id)
 
-        logging.info(f"Finished embedding process for lecture_id={lecture_id}")
-
     except Exception as e:
         logging.error(
             f"Error processing embedding for lecture {lecture_id}: {e}", exc_info=True
@@ -155,4 +152,3 @@ async def process_embedding_job(payload: EmbeddingPayload):
         raise
     finally:
         await conn.close()
-        logging.info(f"Postgres connection closed for embedding lecture {lecture_id}")

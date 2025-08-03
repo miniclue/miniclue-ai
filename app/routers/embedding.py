@@ -20,12 +20,12 @@ async def handle_embedding_job(request: PubSubRequest):
     """Handles an embedding job request from Pub/Sub."""
     try:
         payload = EmbeddingPayload(**request.message.data)
-        logging.info(f"Processing embedding job for lecture_id: {payload.lecture_id}")
         await process_embedding_job(payload)
+
     except Exception as e:
         logging.error(f"Embedding job failed: {e}", exc_info=True)
-        # Re-raise as an HTTPException to ensure Pub/Sub receives a failure response
-        # and can attempt a retry, which is crucial for resilient systems.
+        # Re-raise as an HTTPException to signal a server-side error to Pub/Sub,
+        # which will trigger a retry. The dead-letter queue is the final backstop.
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to process embedding job: {e}",

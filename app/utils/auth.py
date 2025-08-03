@@ -78,7 +78,3 @@ async def verify_token(request: Request, authorization: str = Header(None)):
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Forbidden: token email does not match expected service account",
         )
-
-    logging.info(
-        f"Successfully authenticated and authorized Pub/Sub push request for email: {email}"
-    )

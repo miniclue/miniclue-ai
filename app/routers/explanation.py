@@ -20,7 +20,6 @@ async def handle_explanation_job(request: PubSubRequest):
     """Handles an explanation job request from Pub/Sub."""
     try:
         payload = ExplanationPayload(**request.message.data)
-        logging.info(f"Processing explanation job for slide: {payload.slide_number}")
         await process_explanation_job(payload)
     except Exception as e:
         logging.error(f"Explanation job failed: {e}", exc_info=True)

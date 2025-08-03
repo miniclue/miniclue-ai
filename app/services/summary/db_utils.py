@@ -109,7 +109,6 @@ async def set_lecture_status_to_complete(conn: asyncpg.Connection, lecture_id: U
     """
     Sets the lecture's status to 'complete' and records the completion time.
     """
-    logging.info(f"[{lecture_id}]: Setting lecture status to 'complete'.")
     await conn.execute(
         """
         UPDATE lectures

@@ -20,7 +20,6 @@ async def handle_summary_job(request: PubSubRequest):
     """Handles a summary job request from Pub/Sub."""
     try:
         payload = SummaryPayload(**request.message.data)
-        logging.info(f"Received summary job for lecture_id: {payload.lecture_id}")
         await process_summary_job(payload)
 
     except Exception as e:

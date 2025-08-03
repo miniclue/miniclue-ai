@@ -28,10 +28,6 @@ async def process_explanation_job(payload: ExplanationPayload):
     """
     Orchestrates the entire process of generating an explanation for a single slide.
     """
-    logging.info(
-        f"Received explanation request for slide {payload.slide_number} of lecture {payload.lecture_id}"
-    )
-
     # Destructure payload for easier reference
     lecture_id = payload.lecture_id
     slide_id = payload.slide_id
@@ -130,15 +126,11 @@ async def process_explanation_job(payload: ExplanationPayload):
             result,
             metadata,
         )
-        logging.info(f"Saved explanation for slide {slide_id}")
 
         # 7. Update progress and trigger summary if it was the last slide
         is_complete = await increment_progress_and_check_completion(conn, lecture_id)
 
         if is_complete:
-            logging.info(
-                f"Lecture {lecture_id} processing complete. Publishing summary job."
-            )
             publish_summary_job(
                 lecture_id,
                 customer_identifier,
@@ -148,7 +140,7 @@ async def process_explanation_job(payload: ExplanationPayload):
 
     except Exception as e:
         logging.error(
-            f"Error processing explanation for slide {slide_id}: {e}",
+            f"Explanation job failed for slide {slide_id} in lecture {lecture_id}: {e}",
             exc_info=True,
         )
         if conn:

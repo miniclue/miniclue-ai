@@ -77,9 +77,6 @@ async def update_image_analysis_results(
             lecture_id,
             image_hash,
         )
-        logging.info(
-            f"Updated analysis for image hash {image_hash} in lecture {lecture_id}."
-        )
     except Exception as e:
         logging.error(
             f"Error updating analysis for hash {image_hash} in lecture {lecture_id}: {e}",
@@ -104,9 +101,6 @@ async def increment_processed_images_count(
             raise Exception(f"Lecture {lecture_id} not found for incrementing count.")
         processed_count = result["processed_sub_images"]
         total_count = result["total_sub_images"]
-        logging.info(
-            f"Incremented processed images for lecture {lecture_id}: {processed_count}/{total_count}"
-        )
         return processed_count, total_count
     except Exception as e:
         logging.error(

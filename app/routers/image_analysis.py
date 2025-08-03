@@ -20,9 +20,6 @@ async def handle_image_analysis_job(request: PubSubRequest):
     """Handles an image analysis job request from Pub/Sub."""
     try:
         payload = ImageAnalysisPayload(**request.message.data)
-        logging.info(
-            f"Processing image analysis job for image_hash: {payload.image_hash}"
-        )
         await process_image_analysis_job(payload)
     except Exception as e:
         logging.error(f"Image analysis job failed: {e}", exc_info=True)

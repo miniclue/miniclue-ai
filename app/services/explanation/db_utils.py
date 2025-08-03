@@ -104,9 +104,6 @@ async def increment_progress_and_check_completion(
             lecture_id,
         )
         if progress and progress["processed_slides"] >= progress["total_slides"]:
-            await conn.execute(
-                "UPDATE lectures SET status = 'summarising' WHERE id = $1",
-                lecture_id,
-            )
+            # Don't change status here - that's the summary service's responsibility
             return True
-    return False
+        return False
