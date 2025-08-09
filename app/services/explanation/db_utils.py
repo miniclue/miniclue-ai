@@ -5,6 +5,7 @@ import json
 
 import asyncpg
 from app.schemas.explanation import ExplanationResult
+from app.utils.sanitize import sanitize_text, sanitize_json
 
 
 async def verify_lecture_exists(conn: asyncpg.Connection, lecture_id: UUID) -> bool:
@@ -70,6 +71,9 @@ async def save_explanation(
     metadata: dict,
 ) -> None:
     """Saves the AI's explanation and metadata to the 'explanations' table."""
+    safe_content = sanitize_text(result.explanation) or ""
+    safe_one_liner = sanitize_text(result.one_liner) or ""
+    safe_metadata = sanitize_json(metadata) if metadata is not None else {}
     await conn.execute(
         """
         INSERT INTO explanations (slide_id, lecture_id, slide_number, content, one_liner, slide_type, metadata)
@@ -79,10 +83,10 @@ async def save_explanation(
         slide_id,
         lecture_id,
         slide_number,
-        result.explanation,
-        result.one_liner,
+        safe_content,
+        safe_one_liner,
         result.slide_purpose,
-        json.dumps(metadata),
+        json.dumps(safe_metadata),
     )
 
 

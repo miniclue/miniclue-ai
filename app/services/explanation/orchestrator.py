@@ -19,6 +19,7 @@ from app.services.explanation.s3_utils import download_slide_image
 from app.services.explanation.pubsub_utils import publish_summary_job
 from app.utils.config import Settings
 from app.utils.llm_db_utils import log_llm_call, compute_cost
+from app.utils.sanitize import sanitize_json, sanitize_text
 
 
 settings = Settings()
@@ -34,7 +35,7 @@ async def _record_explanation_error(
     error_info = {
         "service": "explanation",
         "slide_id": str(slide_id),
-        "error": str(error_message),
+        "error": sanitize_text(str(error_message)) or "",
         "server_info": json.dumps({"server_pid": conn.get_server_pid()}),
     }
 
@@ -56,9 +57,11 @@ async def _record_explanation_error(
         # If no existing errors, create new list
         error_list = [error_info]
 
+    # Ensure JSON is safe for JSONB
+    safe_error_list = sanitize_json(error_list)
     await conn.execute(
         "UPDATE lectures SET explanation_error_details = $1::jsonb, updated_at = NOW() WHERE id = $2",
-        json.dumps(error_list),
+        json.dumps(safe_error_list),
         lecture_id,
     )
 

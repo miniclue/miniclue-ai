@@ -2,6 +2,7 @@ import logging
 from uuid import UUID
 
 import asyncpg
+from app.utils.sanitize import sanitize_text
 
 
 async def verify_lecture_exists(conn: asyncpg.Connection, lecture_id: UUID) -> bool:
@@ -77,6 +78,7 @@ async def get_or_create_slide(
     if slide_id:
         return slide_id
 
+    safe_raw_text = sanitize_text(raw_text)
     return await conn.fetchval(
         """
         INSERT INTO slides (lecture_id, slide_number, raw_text)
@@ -87,7 +89,7 @@ async def get_or_create_slide(
         """,
         lecture_id,
         slide_number,
-        raw_text,
+        safe_raw_text,
     )
 
 
@@ -109,6 +111,7 @@ async def get_or_create_chunk(
     if chunk_id:
         return chunk_id
 
+    safe_text = sanitize_text(text_chunk) or ""
     return await conn.fetchval(
         """
         INSERT INTO chunks
@@ -121,7 +124,7 @@ async def get_or_create_chunk(
         lecture_id,
         slide_number,
         chunk_index,
-        text_chunk,
+        safe_text,
         token_count,
     )
 
