@@ -1,7 +1,6 @@
 import base64
-import json
+import asyncio
 import logging
-import re
 from io import BytesIO
 from PIL import Image
 from typing import Optional
@@ -11,7 +10,7 @@ from pydantic import ValidationError
 
 from app.schemas.image_analysis import ImageAnalysisResult
 from app.utils.config import Settings
-from app.utils.posthog_client import posthog_gemini_client
+from app.utils.posthog_client import posthog_openai_client
 
 # Initialize settings and client at the module level
 settings = Settings()
@@ -26,7 +25,7 @@ async def analyze_image(
     email: Optional[str] = None,
 ) -> tuple[ImageAnalysisResult, dict]:
     """
-    Analyzes an image using the Gemini API
+    Analyzes an image using OpenAI Responses API with structured outputs
     """
     try:
         with open("app/services/image_analysis/prompt.md", "r", encoding="utf-8") as f:
@@ -42,84 +41,109 @@ async def analyze_image(
     data_url = f"data:{image_mime_type};base64,{base64_image}"
 
     try:
-        response = await posthog_gemini_client.chat.completions.create(
-            model=settings.image_analysis_model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": system_prompt,
+        response = await asyncio.wait_for(
+            posthog_openai_client.responses.parse(
+                model=settings.image_analysis_model,
+                instructions=system_prompt,
+                input=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "input_image", "image_url": data_url},
+                            {
+                                "type": "input_text",
+                                "text": "Analyze the image per the system prompt.",
+                            },
+                        ],
+                    },
+                ],
+                reasoning={"effort": "low"},
+                text={"verbosity": "low"},
+                text_format=ImageAnalysisResult,
+                posthog_distinct_id=customer_identifier,
+                posthog_trace_id=lecture_id,
+                posthog_properties={
+                    "service": "image_analysis",
+                    "lecture_id": lecture_id,
+                    "slide_image_id": slide_image_id,
+                    "image_size_bytes": len(image_bytes),
+                    "customer_name": name,
+                    "customer_email": email,
                 },
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": data_url},
-                        },
-                    ],
-                },
-            ],
-            max_tokens=1024,
-            temperature=0.1,
-            response_format={"type": "json_object"},
-            posthog_distinct_id=customer_identifier,
-            posthog_trace_id=lecture_id,
-            posthog_properties={
-                "service": "image_analysis",
-                "lecture_id": lecture_id,
-                "slide_image_id": slide_image_id,
-                "image_size_bytes": len(image_bytes),
-                "customer_name": name,
-                "customer_email": email,
-            },
+            ),
+            timeout=60.0,
         )
 
-        response_text = response.choices[0].message.content
-        if not response_text:
-            raise ValueError("Received empty response from Gemini.")
-
-        # Strip markdown code fences if present
-        if response_text.startswith("```json"):
-            response_text = re.sub(
-                r"^\s*```json\s*(.*?)\s*```\s*$", r"\1", response_text, flags=re.DOTALL
-            )
-
-        try:
-            analysis_data = json.loads(response_text)
-        except json.JSONDecodeError:
+        result = response.output_parsed
+        if result is None:
             logging.warning(
-                "JSON decoding failed. Attempting to fix invalid backslash escapes and retry."
+                "Image analysis output_parsed was None; retrying with explicit instruction"
             )
-            sanitized_text = re.sub(r'\\([^"\\/bfnrtu])', r"\\\\\1", response_text)
-            try:
-                analysis_data = json.loads(sanitized_text)
-            except json.JSONDecodeError as e:
+            retry_response = await asyncio.wait_for(
+                posthog_openai_client.responses.parse(
+                    model=settings.image_analysis_model,
+                    input=[
+                        {
+                            "role": "user",
+                            "content": "Return a valid JSON object matching the 'ImageAnalysisResult' schema.",
+                        }
+                    ],
+                    reasoning={"effort": "low"},
+                    text={"verbosity": "low"},
+                    text_format=ImageAnalysisResult,
+                    previous_response_id=response.id,
+                    posthog_distinct_id=customer_identifier,
+                    posthog_trace_id=lecture_id,
+                    posthog_properties={
+                        "service": "image_analysis",
+                        "lecture_id": lecture_id,
+                        "slide_image_id": slide_image_id,
+                        "image_size_bytes": len(image_bytes),
+                        "customer_name": name,
+                        "customer_email": email,
+                        "retry": True,
+                    },
+                ),
+                timeout=30.0,
+            )
+            result = retry_response.output_parsed
+            if result is None:
                 logging.error(
-                    f"Still failed to parse JSON after sanitizing: {sanitized_text}",
-                    exc_info=True,
+                    "Retry failed to produce structured output; creating fallback ImageAnalysisResult"
                 )
-                raise ValueError(
-                    "Gemini response was not valid JSON even after sanitizing."
-                ) from e
-        # Build result and metadata for logging and database
-        result = ImageAnalysisResult(**analysis_data)
+                result = ImageAnalysisResult(type="content", ocr_text="", alt_text="")
+                metadata = {
+                    "model": retry_response.model,
+                    "usage": (
+                        retry_response.usage.model_dump()
+                        if retry_response.usage
+                        else None
+                    ),
+                    "response_id": retry_response.id,
+                    "fallback": True,
+                }
+                return result, metadata
+
         metadata = {
             "model": response.model,
             "usage": response.usage.model_dump() if response.usage else None,
-            "finish_reason": response.choices[0].finish_reason,
             "response_id": response.id,
         }
         return result, metadata
 
+    except asyncio.TimeoutError:
+        logging.error("Timeout occurred while calling the AI model for image analysis")
+        raise ValueError("AI model request timed out")
     except ValidationError as e:
         logging.error(
-            f"Gemini response did not match Pydantic model: {response_text}",
-            exc_info=True,
+            "Image analysis response did not match Pydantic model", exc_info=True
         )
-        raise ValueError("Gemini response did not match the expected format.") from e
+        raise ValueError(
+            "Image analysis response did not match the expected format."
+        ) from e
     except Exception:
         logging.error(
-            "An unexpected error occurred during Gemini image analysis.", exc_info=True
+            "An unexpected error occurred during image analysis.", exc_info=True
         )
         raise
 
@@ -139,7 +163,6 @@ def mock_analyze_image(
     metadata = {
         "model": "mock-image-analysis-model",
         "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
-        "finish_reason": "stop",
         "response_id": f"mock_response_{uuid.uuid4()}",
         "mock": True,
     }

@@ -3,7 +3,7 @@ import uuid
 from typing import Optional
 
 from app.utils.config import Settings
-from app.utils.posthog_client import posthog_gemini_client
+from app.utils.posthog_client import posthog_openai_client
 
 # Initialize settings
 settings = Settings()
@@ -27,28 +27,31 @@ async def generate_summary(
     try:
 
         with open("app/services/summary/prompt.md", "r", encoding="utf-8") as f:
-            prompt_template = f.read()
+            system_prompt = f.read()
     except FileNotFoundError:
         logging.error("Summary prompt file not found.")
         raise
 
     # Format the explanations into a numbered list for the prompt
     formatted_explanations = "\n".join(
-        f"{i}. {exp}" for i, exp in enumerate(explanations, 1)
+        f"Slide {i}: {exp}" for i, exp in enumerate(explanations, 1)
     )
 
     # Fill the prompt template
-    prompt = prompt_template.format(explanations=formatted_explanations)
+    user_message_content = [
+        {
+            "type": "input_text",
+            "text": formatted_explanations,
+        }
+    ]
 
     try:
-        response = await posthog_gemini_client.chat.completions.create(
+        response = await posthog_openai_client.responses.create(
             model=settings.summary_model,
-            messages=[
-                {"role": "system", "content": "You are an expert academic assistant."},
-                {"role": "user", "content": prompt},
-            ],
-            temperature=0.3,
-            n=1,
+            instructions=system_prompt,
+            input=[{"role": "user", "content": user_message_content}],
+            reasoning={"effort": "minimal"},
+            text={"verbosity": "low"},
             posthog_distinct_id=customer_identifier,
             posthog_trace_id=lecture_id,
             posthog_properties={
@@ -59,12 +62,11 @@ async def generate_summary(
                 "customer_email": email,
             },
         )
-        summary = response.choices[0].message.content
+        summary = response.output_text
 
         metadata = {
             "model": response.model,
             "usage": response.usage.model_dump() if response.usage else None,
-            "finish_reason": response.choices[0].finish_reason,
             "response_id": response.id,
         }
 
@@ -118,7 +120,6 @@ This is a mock response. If this were a real request, the following prompt would
     metadata = {
         "model": "mock-summary-model",
         "usage": {"prompt_tokens": 200, "completion_tokens": 100, "total_tokens": 300},
-        "finish_reason": "stop",
         "response_id": f"mock_response_{uuid.uuid4()}",
         "mock": True,
     }

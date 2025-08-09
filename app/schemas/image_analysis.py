@@ -1,3 +1,4 @@
+from enum import Enum
 from uuid import UUID
 from pydantic import BaseModel, Field
 from typing import Optional
@@ -13,7 +14,11 @@ class ImageAnalysisPayload(BaseModel):
 
 
 class ImageAnalysisResult(BaseModel):
-    image_type: str = Field(
+    class ImageType(str, Enum):
+        content = "content"
+        decorative = "decorative"
+
+    image_type: ImageType = Field(
         ...,
         alias="type",
         description="The type of the image, e.g., 'content' or 'decorative'.",

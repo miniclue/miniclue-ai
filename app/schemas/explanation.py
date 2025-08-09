@@ -1,3 +1,4 @@
+from enum import Enum
 from uuid import UUID
 from pydantic import BaseModel, Field
 from typing import Optional
@@ -19,6 +20,13 @@ class ExplanationResult(BaseModel):
         ..., description="Detailed explanation of the slide's content."
     )
     one_liner: str = Field(..., description="A one-sentence summary of the slide.")
-    slide_purpose: str = Field(
+
+    class SlidePurpose(str, Enum):
+        cover = "cover"
+        header = "header"
+        content = "content"
+        error = "error"
+
+    slide_purpose: SlidePurpose = Field(
         ..., description="The purpose of the slide in the context of the presentation."
     )

@@ -3,7 +3,7 @@ import asyncpg
 import boto3
 import json
 
-from app.schemas.explanation import ExplanationPayload
+from app.schemas.explanation import ExplanationPayload, ExplanationResult
 from app.services.explanation.db_utils import (
     verify_lecture_exists,
     explanation_exists,
@@ -35,7 +35,7 @@ async def _record_explanation_error(
         "service": "explanation",
         "slide_id": str(slide_id),
         "error": str(error_message),
-        "timestamp": str(conn.get_server_tid()),
+        "server_info": json.dumps({"server_pid": conn.get_server_pid()}),
     }
 
     # Get existing error details and append new error
@@ -108,7 +108,7 @@ async def process_explanation_job(payload: ExplanationPayload):
         # 4. Gather context (previous and next slide text)
         prev_text, next_text = await get_slide_context(conn, lecture_id, slide_number)
 
-        # 5. Call the AI Professor
+        # 5. Call LLM
         if settings.mock_llm_calls:
             result, metadata = mock_generate_explanation(
                 image_bytes,
@@ -134,29 +134,39 @@ async def process_explanation_job(payload: ExplanationPayload):
                     email,
                 )
 
-                # Check if this was a fallback response
-                if metadata.get("fallback"):
-                    logging.warning(
-                        f"Used fallback response for slide {slide_id} due to JSON parsing issues"
-                    )
-                    # Still save the fallback response but mark it appropriately
-                    metadata["fallback_reason"] = metadata.get(
-                        "error", "Unknown JSON parsing error"
+            except Exception as e:
+                # For any error (timeout, empty response, network, etc.), create a
+                # fallback explanation so the slide is populated and progress can proceed.
+                logging.error(
+                    f"LLM call failed for slide {slide_id}: {e}", exc_info=True
+                )
+
+                # Record the error for auditing
+                try:
+                    await _record_explanation_error(conn, lecture_id, slide_id, e)
+                except Exception:
+                    logging.error(
+                        "Failed to record explanation error to DB", exc_info=True
                     )
 
-            except ValueError as e:
-                logging.error(
-                    f"JSON decoding error for slide {slide_id}: {e}", exc_info=True
+                # Create minimal fallback for unexpected exceptions
+                result = ExplanationResult(
+                    explanation="Unable to generate explanation due to technical difficulties. Please try again.",
+                    one_liner="Technical error occurred during explanation generation.",
+                    slide_purpose="error",
                 )
-                await _record_explanation_error(conn, lecture_id, slide_id, e)
-                return
-            except Exception as e:
-                logging.error(
-                    f"Unexpected error during explanation generation for slide {slide_id}: {e}",
-                    exc_info=True,
-                )
-                await _record_explanation_error(conn, lecture_id, slide_id, e)
-                return
+                metadata = {
+                    "model": settings.explanation_model,
+                    "usage": {
+                        "prompt_tokens": 0,
+                        "completion_tokens": 0,
+                        "total_tokens": 0,
+                    },
+                    "response_id": None,
+                    "fallback": True,
+                    "fallback_reason": str(e),
+                }
+
         # Log LLM call for explanation
         try:
             usage = metadata.get("usage") or {}
