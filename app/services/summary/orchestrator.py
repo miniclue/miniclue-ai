@@ -14,6 +14,7 @@ async def process_summary_job(payload: SummaryPayload):
     """
     lecture_id = payload.lecture_id
 
+    conn = None
     try:
         conn = await asyncpg.connect(settings.postgres_dsn, statement_cache_size=0)
 

@@ -88,19 +88,24 @@ async def process_explanation_job(payload: ExplanationPayload):
     name = payload.name
     email = payload.email
 
-    # Initialize connections
+    # Initialize resources
+    conn = None
+    s3_client = None
+    image_bytes = None
+
     if not settings.postgres_dsn:
         raise ValueError("POSTGRES_DSN is not configured.")
-    conn = await asyncpg.connect(settings.postgres_dsn, statement_cache_size=0)
-
-    s3_client = boto3.client(
-        "s3",
-        aws_access_key_id=settings.s3_access_key or None,
-        aws_secret_access_key=settings.s3_secret_key or None,
-        endpoint_url=settings.s3_endpoint_url or None,
-    )
 
     try:
+        conn = await asyncpg.connect(settings.postgres_dsn, statement_cache_size=0)
+
+        s3_client = boto3.client(
+            "s3",
+            aws_access_key_id=settings.s3_access_key or None,
+            aws_secret_access_key=settings.s3_secret_key or None,
+            endpoint_url=settings.s3_endpoint_url or None,
+        )
+
         # 1. Verify lecture exists
         if not await verify_lecture_exists(conn, lecture_id):
             logging.warning(f"Lecture {lecture_id} not found. Acknowledging message.")
@@ -235,4 +240,10 @@ async def process_explanation_job(payload: ExplanationPayload):
             await _record_explanation_error(conn, lecture_id, slide_id, e)
         raise
     finally:
-        await conn.close()
+        # Clean up resources explicitly to prevent memory leaks
+        if image_bytes is not None:
+            del image_bytes
+        if s3_client:
+            s3_client.close()
+        if conn:
+            await conn.close()

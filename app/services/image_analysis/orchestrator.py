@@ -30,20 +30,22 @@ async def process_image_analysis_job(
     name = payload.name
     email = payload.email
 
-    # Initialize clients
+    # Initialize resources
+    conn = None
+    s3_client = None
+    image_bytes = None
+
     if not settings.postgres_dsn:
         logging.error("Database settings are not configured.")
         raise RuntimeError("Required settings are not configured.")
 
-    s3_client = boto3.client(
-        "s3",
-        aws_access_key_id=settings.s3_access_key or None,
-        aws_secret_access_key=settings.s3_secret_key or None,
-        endpoint_url=settings.s3_endpoint_url or None,
-    )
-    conn = None
-
     try:
+        s3_client = boto3.client(
+            "s3",
+            aws_access_key_id=settings.s3_access_key or None,
+            aws_secret_access_key=settings.s3_secret_key or None,
+            endpoint_url=settings.s3_endpoint_url or None,
+        )
         conn = await asyncpg.connect(settings.postgres_dsn, statement_cache_size=0)
 
         # 1. Verify lecture exists (Defensive Subscriber)
@@ -153,5 +155,10 @@ async def process_image_analysis_job(
         # Re-raising ensures the message is not acknowledged and will be redelivered
         raise
     finally:
+        # Clean up resources explicitly to prevent memory leaks
+        if image_bytes is not None:
+            del image_bytes
+        if s3_client:
+            s3_client.close()
         if conn:
             await conn.close()
