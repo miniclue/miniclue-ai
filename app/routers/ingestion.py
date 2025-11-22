@@ -17,11 +17,26 @@ router = APIRouter(
 @router.post("", status_code=status.HTTP_204_NO_CONTENT)
 async def handle_ingestion_job(request: PubSubRequest):
     """Handles an ingestion job request from Pub/Sub."""
+    logging.info(
+        f"📥 Received ingestion request from subscription: {request.subscription}"
+    )
+    logging.debug(f"Request message data: {request.message.data}")
+
     try:
+        logging.info("Parsing ingestion payload...")
         payload = IngestionPayload(**request.message.data)
+        logging.info(
+            f"✅ Payload parsed successfully - Lecture ID: {payload.lecture_id}, "
+            f"Storage Path: {payload.storage_path}, Customer: {payload.customer_identifier}"
+        )
+
+        logging.info(f"🚀 Starting ingestion process for lecture {payload.lecture_id}")
         await ingest(payload)
+        logging.info(
+            f"✅ Ingestion completed successfully for lecture {payload.lecture_id}"
+        )
     except Exception as e:
-        logging.error(f"Ingestion job failed: {e}", exc_info=True)
+        logging.error(f"❌ Ingestion job failed: {e}", exc_info=True)
         # Re-raise to be caught by the global exception handler
         # This ensures the message is not acknowledged and will be redelivered.
         raise HTTPException(

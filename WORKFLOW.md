@@ -91,108 +91,11 @@ Base URL:
 ├── GET / → fetch user profile
 ├── POST / → create or update profile
 ├── GET /courses → list user's courses
-├── GET /recents → list recent lectures (`?limit=&offset=`)
-└── GET /usage → get user usage statistics
-└── GET /subscriptions → get user's active subscription
-
-/v1/subscriptions
-├── POST /checkout → create Stripe checkout session
-└── GET /portal → create Stripe customer portal session
-
-/v1/stripe/webhooks
-└── POST / → handle Stripe webhook events
+└── GET /recents → list recent lectures (`?limit=&offset=`)
 
 /v1/dlq
 └── POST / → handle dead-letter queue messages (Pub/Sub push)
 ```
-
-# Pricing
-
-**Free:**
-
-- Cost: $0/mo
-- 3 lecture uploads per month
-- Max 10 MB per lecture
-- Limited chat usage
-
-**Beta:**
-
-- Cost: $0/mo
-- Unlimited lecture uploads per month (100 lecture uploads per month)
-- Max 300 MB per lecture
-- Unlimited chat usage
-- Beta pricing will only end once beta is over
-
-**Pro (Monthly) - Launch Offer:**
-
-- Cost: $10/mo
-- Unlimited lecture uploads per month
-- Max 300 MB per lecture
-- Unlimited chat usage
-- Price will increase to $20/month as new features (tutorial explainers, flashcards, MCQ quiz) are added
-
-**Pro (Annual) - Launch Offer:**
-
-- Cost: $6/mo ($72/yr)
-- Same benefits as Pro (Monthly)
-- Price will increase to $12/mo ($144/yr) as new features (tutorial explainers, flashcards, MCQ quiz) are added
-
-**Pro (Monthly):**
-
-- Cost: $20/mo
-- Unlimited lecture uploads per month
-- Max 300 MB per lecture
-- Unlimited chat usage
-
-**Pro (Annual):**
-
-- Cost: $12/mo ($144/yr)
-- Same benefits as Pro (Monthly)
-
-# Subscription Lifecycle
-
-This section outlines how user subscriptions are managed, renewed, and synchronized with our billing provider (Stripe).
-
-## Free & Beta Plan Lifecycle (Automated via `pg_cron`)
-
-Free-tier renewals are handled automatically by a daily database job, ensuring users get a fresh quota each month without manual intervention.
-
-- **Onboarding:** New users are automatically subscribed to the `beta` plan upon their first sign-in. This is handled by the Go API's `user_service`, which idempotently creates a subscription record `ON CONFLICT DO NOTHING`.
-- **Active Period:** A subscription is considered active for its defined period (e.g., 31 days).
-- **The "Expired Gap" & Mitigation:** A brief window could exist where a user's plan is technically expired before the daily renewal job runs. This is mitigated by a **6-hour grace period** in the `GetActiveSubscription` database query, which treats a recently expired subscription as active. This ensures the renewal is seamless from a user's perspective.
-- **Daily Renewal (`pg_cron`):** A scheduled job (`cron.schedule`) runs once every 24 hours. It finds all `'active'` subscriptions for the `'free'` and `'beta'` plans that have passed their `ends_at` date and rolls their billing period forward.
-
-## Paid Plan Lifecycle (Driven by Stripe Webhooks)
-
-Stripe is the source of truth for all paid plans. Our database simply mirrors the state provided by Stripe's webhook events.
-
-1.  **Upgrade to Paid:**
-
-    - A user initiates an upgrade in the UI and is redirected to a **Stripe Checkout** session.
-    - Upon successful payment, Stripe sends a `checkout.session.completed` webhook to our Go API.
-    - The webhook handler creates or updates the user's record in `user_subscriptions` with the new `plan_id` and the `ends_at` timestamp provided by Stripe.
-
-2.  **Automatic Renewals:**
-
-    - Stripe automatically handles recurring billing based on the plan's interval (monthly or yearly).
-    - On a successful charge, Stripe sends an `invoice.payment_succeeded` webhook.
-    - Our handler updates the `ends_at` timestamp to reflect the new billing period.
-
-3.  **User-Initiated Cancellation:**
-
-    - The user cancels their plan via the **Stripe Customer Portal**.
-    - Stripe sends a `customer.subscription.updated` webhook, indicating the subscription will `cancel_at_period_end`.
-    - Our handler updates the subscription `status` to `'cancelled'`. The user retains full access until their paid period ends.
-
-4.  **Downgrade to Free (at Period End):**
-
-    - When the paid period officially ends, Stripe sends a `customer.subscription.deleted` webhook.
-    - Our handler receives this and updates the user's subscription: `plan_id` is set back to `'free'`, `status` becomes `'active'`, and a new 31-day period begins.
-
-5.  **Failed Payments (Dunning):**
-    - If a recurring payment fails, Stripe sends an `invoice.payment_failed` webhook.
-    - Our handler updates the user's subscription `status` to `'past_due'`.
-    - Our API middleware will block lecture upload for any user whose status is not `'active'` or `'cancelled'`.
 
 # Authentication
 
@@ -281,7 +184,7 @@ The new system is designed around two parallel processing tracks that start afte
 - **Trigger:** The user selects one or more PDF files and clicks "Upload" in the Next.js application.
 - **Action:**
   1.  The frontend sends a `POST` request to `/v1/lectures/batch-upload-url` with the course ID and filenames.
-  2.  The Go API validates the user's subscription quota and course access.
+  2.  The Go API validates the user's course access.
   3.  For each file, the API creates a new record in the `lectures` table with a status of `uploading`.
   4.  The API generates presigned URLs for direct S3 uploads and returns them to the frontend.
   5.  The frontend uploads each PDF file directly to S3 using the provided presigned URLs.
