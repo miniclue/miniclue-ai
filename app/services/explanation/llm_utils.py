@@ -8,7 +8,8 @@ from pydantic import ValidationError
 
 from app.schemas.explanation import ExplanationResult
 from app.utils.config import Settings
-from app.utils.posthog_client import posthog_openai_client
+from app.utils.posthog_client import create_posthog_client
+from app.utils.secret_manager import InvalidAPIKeyError
 
 
 # Initialize settings
@@ -24,6 +25,7 @@ async def generate_explanation(
     lecture_id: str,
     slide_id: str,
     customer_identifier: str,
+    user_api_key: str,
     name: Optional[str] = None,
     email: Optional[str] = None,
 ) -> tuple[ExplanationResult, dict]:
@@ -78,10 +80,13 @@ Output exactly one valid JSON object with:
         },
     ]
 
+    # Create client with user's API key
+    client = create_posthog_client(user_api_key, provider="openai")
+
     try:
         # Add timeout to prevent hanging
         response = await asyncio.wait_for(
-            posthog_openai_client.responses.parse(
+            client.responses.parse(
                 model=settings.explanation_model,
                 instructions=system_prompt,
                 input=[{"role": "user", "content": user_message_content}],
@@ -110,7 +115,7 @@ Output exactly one valid JSON object with:
                 "output_parsed was None; retrying with explicit structured request"
             )
             retry_response = await asyncio.wait_for(
-                posthog_openai_client.responses.parse(
+                client.responses.parse(
                     model=settings.explanation_model,
                     input=[
                         {
@@ -174,6 +179,16 @@ Output exactly one valid JSON object with:
         logging.error(f"Failed to validate AI response into Pydantic model: {e}")
         raise
     except Exception as e:
+        # Check if it's an authentication error (invalid API key)
+        error_str = str(e).lower()
+        if (
+            "authentication" in error_str
+            or "unauthorized" in error_str
+            or "invalid api key" in error_str
+            or "401" in error_str
+        ):
+            logging.error(f"OpenAI authentication error (invalid API key): {e}")
+            raise InvalidAPIKeyError(f"Invalid API key: {str(e)}") from e
         logging.error(f"An unexpected error occurred while calling OpenAI: {e}")
         raise
 

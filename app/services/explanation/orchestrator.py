@@ -20,6 +20,11 @@ from app.services.explanation.pubsub_utils import publish_summary_job
 from app.utils.config import Settings
 from app.utils.llm_db_utils import log_llm_call, compute_cost
 from app.utils.sanitize import sanitize_json, sanitize_text
+from app.utils.secret_manager import (
+    get_user_api_key,
+    SecretNotFoundError,
+    InvalidAPIKeyError,
+)
 
 
 settings = Settings()
@@ -124,7 +129,30 @@ async def process_explanation_job(payload: ExplanationPayload):
         # 4. Gather context (previous and next slide text)
         prev_text, next_text = await get_slide_context(conn, lecture_id, slide_number)
 
-        # 5. Call LLM
+        # 5. Fetch user OpenAI API key from Secret Manager (required)
+        try:
+            user_api_key = get_user_api_key(customer_identifier, provider="openai")
+        except SecretNotFoundError:
+            logging.error(f"API key not found for user {customer_identifier}")
+            await _record_explanation_error(
+                conn, lecture_id, slide_id, Exception("User API key not found")
+            )
+            raise InvalidAPIKeyError(
+                "User API key not found. Please configure your API key in settings."
+            )
+        except Exception as e:
+            logging.error(
+                f"Failed to fetch user API key for {customer_identifier}: {e}"
+            )
+            await _record_explanation_error(
+                conn,
+                lecture_id,
+                slide_id,
+                Exception(f"Failed to access API key: {str(e)}"),
+            )
+            raise InvalidAPIKeyError(f"Failed to access API key: {str(e)}")
+
+        # 6. Call LLM
         if settings.mock_llm_calls:
             result, metadata = mock_generate_explanation(
                 image_bytes,
@@ -146,6 +174,7 @@ async def process_explanation_job(payload: ExplanationPayload):
                     str(lecture_id),
                     str(slide_id),
                     customer_identifier,
+                    user_api_key,
                     name,
                     email,
                 )

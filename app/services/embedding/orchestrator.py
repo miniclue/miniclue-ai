@@ -9,6 +9,11 @@ from app.schemas.embedding import EmbeddingPayload
 from app.services.embedding import llm_utils
 from app.utils.config import Settings
 from app.utils.llm_db_utils import log_llm_call, compute_cost
+from app.utils.secret_manager import (
+    get_user_api_key,
+    SecretNotFoundError,
+    InvalidAPIKeyError,
+)
 
 settings = Settings()
 
@@ -66,7 +71,23 @@ async def process_embedding_job(payload: EmbeddingPayload):
             enriched_text = " ".join(texts_to_join).strip()
             enriched_texts.append(enriched_text)
 
-        # 4. Generate embeddings in a batch, capturing metadata
+        # 4. Fetch user OpenAI API key from Secret Manager (required)
+        try:
+            user_api_key = get_user_api_key(
+                payload.customer_identifier, provider="openai"
+            )
+        except SecretNotFoundError:
+            logging.error(f"API key not found for user {payload.customer_identifier}")
+            raise InvalidAPIKeyError(
+                "User API key not found. Please configure your API key in settings."
+            )
+        except Exception as e:
+            logging.error(
+                f"Failed to fetch user API key for {payload.customer_identifier}: {e}"
+            )
+            raise InvalidAPIKeyError(f"Failed to access API key: {str(e)}")
+
+        # 5. Generate embeddings in a batch, capturing metadata
         if settings.mock_llm_calls:
             embedding_results, metadata = llm_utils.mock_generate_embeddings(
                 enriched_texts,
@@ -77,6 +98,7 @@ async def process_embedding_job(payload: EmbeddingPayload):
                 enriched_texts,
                 str(lecture_id),
                 payload.customer_identifier,
+                user_api_key,
             )
         # Log LLM call for embedding using the returned metadata
         try:

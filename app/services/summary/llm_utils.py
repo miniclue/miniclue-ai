@@ -3,7 +3,8 @@ import uuid
 from typing import Optional
 
 from app.utils.config import Settings
-from app.utils.posthog_client import posthog_openai_client
+from app.utils.posthog_client import create_posthog_client
+from app.utils.secret_manager import InvalidAPIKeyError
 
 # Initialize settings
 settings = Settings()
@@ -13,6 +14,7 @@ async def generate_summary(
     explanations: list[str],
     lecture_id: str,
     customer_identifier: str,
+    user_api_key: str,
     name: Optional[str] = None,
     email: Optional[str] = None,
 ) -> tuple[str, dict]:
@@ -45,8 +47,11 @@ async def generate_summary(
         }
     ]
 
+    # Create client with user's API key
+    client = create_posthog_client(user_api_key, provider="openai")
+
     try:
-        response = await posthog_openai_client.responses.create(
+        response = await client.responses.create(
             model=settings.summary_model,
             instructions=system_prompt,
             input=[{"role": "user", "content": user_message_content}],
@@ -77,6 +82,16 @@ async def generate_summary(
             return "Error: The AI model returned an empty summary.", metadata
 
     except Exception as e:
+        # Check if it's an authentication error (invalid API key)
+        error_str = str(e).lower()
+        if (
+            "authentication" in error_str
+            or "unauthorized" in error_str
+            or "invalid api key" in error_str
+            or "401" in error_str
+        ):
+            logging.error(f"OpenAI authentication error (invalid API key): {e}")
+            raise InvalidAPIKeyError(f"Invalid API key: {str(e)}") from e
         logging.error(
             f"An error occurred while calling the OpenAI API: {e}", exc_info=True
         )

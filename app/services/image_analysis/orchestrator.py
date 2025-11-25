@@ -8,6 +8,11 @@ from app.services.image_analysis import db_utils, llm_utils, s3_utils, pubsub_ut
 from app.utils.config import Settings
 from app.schemas.image_analysis import ImageAnalysisPayload
 from app.utils.llm_db_utils import log_llm_call, compute_cost
+from app.utils.secret_manager import (
+    get_user_api_key,
+    SecretNotFoundError,
+    InvalidAPIKeyError,
+)
 
 settings = Settings()
 
@@ -64,7 +69,21 @@ async def process_image_analysis_job(
             s3_client, settings.s3_bucket_name, storage_path
         )
 
-        # 4. Analyze image with OpenAI
+        # 4. Fetch user OpenAI API key from Secret Manager (required)
+        try:
+            user_api_key = get_user_api_key(customer_identifier, provider="openai")
+        except SecretNotFoundError:
+            logging.error(f"API key not found for user {customer_identifier}")
+            raise InvalidAPIKeyError(
+                "User API key not found. Please configure your API key in settings."
+            )
+        except Exception as e:
+            logging.error(
+                f"Failed to fetch user API key for {customer_identifier}: {e}"
+            )
+            raise InvalidAPIKeyError(f"Failed to access API key: {str(e)}")
+
+        # 5. Analyze image with OpenAI
         # Perform image analysis and capture metadata
         if settings.mock_llm_calls:
             analysis_result, metadata = llm_utils.mock_analyze_image(
@@ -80,6 +99,7 @@ async def process_image_analysis_job(
                 customer_identifier=customer_identifier,
                 name=name,
                 email=email,
+                user_api_key=user_api_key,
             )
         # Log LLM call for image analysis
         try:

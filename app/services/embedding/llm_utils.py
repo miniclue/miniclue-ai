@@ -1,15 +1,17 @@
 import json
+import logging
 import random
 from typing import List, Dict, Any, Tuple
 
 from app.utils.config import Settings
-from app.utils.posthog_client import posthog_openai_client
+from app.utils.posthog_client import create_posthog_client
+from app.utils.secret_manager import InvalidAPIKeyError
 
 settings = Settings()
 
 
 async def generate_embeddings(
-    texts: List[str], lecture_id: str, customer_identifier: str
+    texts: List[str], lecture_id: str, customer_identifier: str, user_api_key: str
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """
     Generate embedding vectors for a batch of text chunks.
@@ -17,29 +19,49 @@ async def generate_embeddings(
     if not texts:
         return [], {}
 
-    response = await posthog_openai_client.embeddings.create(
-        model=settings.embedding_model,
-        input=texts,
-        posthog_distinct_id=customer_identifier,
-        posthog_trace_id=lecture_id,
-        posthog_properties={
-            "service": "embedding",
-            "lecture_id": lecture_id,
-            "texts_count": len(texts),
-        },
-    )
+    # Create client with user's API key
+    client = create_posthog_client(user_api_key, provider="openai")
 
-    # Batch-level metadata
-    common_metadata: Dict[str, Any] = {
-        "model": response.model,
-        "usage": response.usage.model_dump(),
-    }
-    results: List[Dict[str, Any]] = []
-    for data in response.data:
-        vector_str = json.dumps(data.embedding)
-        # Store an empty object for per-item metadata to avoid redundancy
-        results.append({"vector": vector_str, "metadata": json.dumps({})})
-    return results, common_metadata
+    try:
+        response = await client.embeddings.create(
+            model=settings.embedding_model,
+            input=texts,
+            posthog_distinct_id=customer_identifier,
+            posthog_trace_id=lecture_id,
+            posthog_properties={
+                "service": "embedding",
+                "lecture_id": lecture_id,
+                "texts_count": len(texts),
+            },
+        )
+
+        # Batch-level metadata
+        common_metadata: Dict[str, Any] = {
+            "model": response.model,
+            "usage": response.usage.model_dump(),
+        }
+        results: List[Dict[str, Any]] = []
+        for data in response.data:
+            vector_str = json.dumps(data.embedding)
+            # Store an empty object for per-item metadata to avoid redundancy
+            results.append({"vector": vector_str, "metadata": json.dumps({})})
+        return results, common_metadata
+    except Exception as e:
+        # Check if it's an authentication error (invalid API key)
+        error_str = str(e).lower()
+        if (
+            "authentication" in error_str
+            or "unauthorized" in error_str
+            or "invalid api key" in error_str
+            or "401" in error_str
+        ):
+            logging.error(f"OpenAI authentication error (invalid API key): {e}")
+            raise InvalidAPIKeyError(f"Invalid API key: {str(e)}") from e
+        logging.error(
+            f"An error occurred while calling the OpenAI API for embeddings: {e}",
+            exc_info=True,
+        )
+        raise
 
 
 def mock_generate_embeddings(

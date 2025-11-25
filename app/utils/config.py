@@ -22,10 +22,8 @@ class Settings(BaseSettings):
     pubsub_base_url: str = ""
     pubsub_service_account_email: str = ""
     # OpenAI
-    openai_api_key: str = ""
     openai_api_base_url: str = "https://api.openai.com/v1"
     # Gemini
-    gemini_api_key: str = ""
     gemini_api_base_url: str = "https://generativelanguage.googleapis.com/v1beta"
     # PostHog Configuration
     posthog_api_key: str = ""
