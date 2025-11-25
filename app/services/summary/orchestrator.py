@@ -4,6 +4,11 @@ from app.schemas.summary import SummaryPayload
 from app.services.summary import db_utils, llm_utils
 from app.utils.config import Settings
 from app.utils.llm_db_utils import log_llm_call, compute_cost
+from app.utils.secret_manager import (
+    get_user_api_key,
+    SecretNotFoundError,
+    InvalidAPIKeyError,
+)
 
 settings = Settings()
 
@@ -44,7 +49,23 @@ async def process_summary_job(payload: SummaryPayload):
             "UPDATE lectures SET status = 'summarising' WHERE id = $1", lecture_id
         )
 
-        # 5. Call the AI model to synthesize the explanations into a summary
+        # 5. Fetch user OpenAI API key from Secret Manager (required)
+        try:
+            user_api_key = get_user_api_key(
+                payload.customer_identifier, provider="openai"
+            )
+        except SecretNotFoundError:
+            logging.error(f"API key not found for user {payload.customer_identifier}")
+            raise InvalidAPIKeyError(
+                "User API key not found. Please configure your API key in settings."
+            )
+        except Exception as e:
+            logging.error(
+                f"Failed to fetch user API key for {payload.customer_identifier}: {e}"
+            )
+            raise InvalidAPIKeyError(f"Failed to access API key: {str(e)}")
+
+        # 6. Call the AI model to synthesize the explanations into a summary
         if settings.mock_llm_calls:
             summary_content, metadata = llm_utils.mock_generate_summary(
                 explanations,
@@ -55,6 +76,7 @@ async def process_summary_job(payload: SummaryPayload):
                 explanations,
                 str(lecture_id),
                 payload.customer_identifier,
+                user_api_key,
                 payload.name,
                 payload.email,
             )

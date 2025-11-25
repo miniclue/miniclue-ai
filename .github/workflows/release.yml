@@ -60,9 +60,7 @@ jobs:
             EXPLANATION_TOPIC=${{ secrets.EXPLANATION_TOPIC }}
             SUMMARY_TOPIC=${{ secrets.SUMMARY_TOPIC }}
             EMBEDDING_TOPIC=${{ secrets.EMBEDDING_TOPIC }}
-            OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
             OPENAI_API_BASE_URL=${{ secrets.OPENAI_API_BASE_URL }}
-            GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
             GEMINI_API_BASE_URL=${{ secrets.GEMINI_API_BASE_URL }}
             POSTHOG_API_KEY=${{ secrets.POSTHOG_API_KEY }}
             POSTHOG_HOST=${{ secrets.POSTHOG_HOST }}

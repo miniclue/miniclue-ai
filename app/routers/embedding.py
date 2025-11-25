@@ -6,6 +6,7 @@ from app.schemas.common import PubSubRequest
 from app.schemas.embedding import EmbeddingPayload
 from app.services.embedding.orchestrator import process_embedding_job
 from app.utils.auth import verify_token
+from app.utils.secret_manager import InvalidAPIKeyError
 
 
 router = APIRouter(
@@ -21,7 +22,10 @@ async def handle_embedding_job(request: PubSubRequest):
     try:
         payload = EmbeddingPayload(**request.message.data)
         await process_embedding_job(payload)
-
+    except InvalidAPIKeyError as e:
+        # Permanent error: acknowledge message to stop Pub/Sub retries
+        logging.error(f"Invalid API key for embedding job: {e}")
+        return  # Return 204 to acknowledge the message
     except Exception as e:
         logging.error(f"Embedding job failed: {e}", exc_info=True)
         # Re-raise as an HTTPException to signal a server-side error to Pub/Sub,

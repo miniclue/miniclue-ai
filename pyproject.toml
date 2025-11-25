@@ -24,6 +24,7 @@ dependencies = [
     "posthog (>=6.3.3,<7.0.0)",
     "google-cloud-pubsub (>=2.14.0,<3.0.0)",
     "google-auth (>=2.22.0,<3.0.0)",
+    "google-cloud-secret-manager (>=2.20.0,<3.0.0)",
 ]
 
 

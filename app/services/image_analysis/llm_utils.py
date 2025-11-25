@@ -10,7 +10,8 @@ from pydantic import ValidationError
 
 from app.schemas.image_analysis import ImageAnalysisResult
 from app.utils.config import Settings
-from app.utils.posthog_client import posthog_openai_client
+from app.utils.posthog_client import create_posthog_client
+from app.utils.secret_manager import InvalidAPIKeyError
 
 # Initialize settings and client at the module level
 settings = Settings()
@@ -21,6 +22,7 @@ async def analyze_image(
     lecture_id: str,
     slide_image_id: str,
     customer_identifier: str,
+    user_api_key: str,
     name: Optional[str] = None,
     email: Optional[str] = None,
 ) -> tuple[ImageAnalysisResult, dict]:
@@ -40,9 +42,12 @@ async def analyze_image(
     base64_image = base64.b64encode(image_bytes).decode("utf-8")
     data_url = f"data:{image_mime_type};base64,{base64_image}"
 
+    # Create client with user's API key
+    client = create_posthog_client(user_api_key, provider="openai")
+
     try:
         response = await asyncio.wait_for(
-            posthog_openai_client.responses.parse(
+            client.responses.parse(
                 model=settings.image_analysis_model,
                 instructions=system_prompt,
                 input=[
@@ -80,7 +85,7 @@ async def analyze_image(
                 "Image analysis output_parsed was None; retrying with explicit instruction"
             )
             retry_response = await asyncio.wait_for(
-                posthog_openai_client.responses.parse(
+                client.responses.parse(
                     model=settings.image_analysis_model,
                     input=[
                         {
@@ -141,7 +146,17 @@ async def analyze_image(
         raise ValueError(
             "Image analysis response did not match the expected format."
         ) from e
-    except Exception:
+    except Exception as e:
+        # Check if it's an authentication error (invalid API key)
+        error_str = str(e).lower()
+        if (
+            "authentication" in error_str
+            or "unauthorized" in error_str
+            or "invalid api key" in error_str
+            or "401" in error_str
+        ):
+            logging.error(f"OpenAI authentication error (invalid API key): {e}")
+            raise InvalidAPIKeyError(f"Invalid API key: {str(e)}") from e
         logging.error(
             "An unexpected error occurred during image analysis.", exc_info=True
         )
