@@ -85,6 +85,7 @@ async def process_chat_request(
                     user_api_key=user_api_key,
                     user_id=str(user_id),
                     lecture_id=str(lecture_id),
+                    chat_id=str(chat_id),
                 )
             except Exception as e:
                 logging.warning(f"Query rewriting failed, using original query: {e}")
@@ -107,6 +108,7 @@ async def process_chat_request(
                 context_chunks=context_chunks,
                 message_history=message_history,
                 lecture_id=str(lecture_id),
+                chat_id=str(chat_id),
                 user_id=str(user_id),
                 user_api_key=user_api_key,
                 model=model,
@@ -129,6 +131,95 @@ async def process_chat_request(
         logging.error(
             f"Error processing chat request: lecture_id={lecture_id}, "
             f"chat_id={chat_id}, user_id={user_id}, model={model}, error={e}",
+            exc_info=True,
+        )
+        raise
+    finally:
+        if conn:
+            await conn.close()
+
+
+async def process_title_generation(
+    lecture_id: UUID,
+    chat_id: UUID,
+    user_id: UUID,
+    user_message: list[dict],
+    assistant_message: list[dict],
+) -> str:
+    """
+    Orchestrates title generation for a chat based on the first user message and assistant response.
+    Verifies lecture ownership, extracts message text, and generates title via LLM.
+
+    Args:
+        lecture_id: Lecture ID
+        chat_id: Chat ID
+        user_id: User ID
+        user_message: List of user message parts (dicts with type and text)
+        assistant_message: List of assistant message parts (dicts with type and text)
+
+    Returns:
+        Generated title string
+    """
+    conn = None
+    try:
+        conn = await asyncpg.connect(settings.postgres_dsn, statement_cache_size=0)
+
+        # Verify lecture exists and user owns it
+        if not await db_utils.verify_lecture_exists_and_ownership(
+            conn, lecture_id, user_id
+        ):
+            raise ValueError(
+                f"Lecture {lecture_id} not found or user {user_id} does not own it"
+            )
+
+        # Extract text from user message parts
+        user_message_text = ""
+        for part in user_message:
+            if part.get("type") == "text" and part.get("text"):
+                user_message_text += part["text"] + " "
+
+        user_message_text = user_message_text.strip()
+        if not user_message_text:
+            raise ValueError("User message must contain at least one text part")
+
+        # Extract text from assistant message parts
+        assistant_message_text = ""
+        for part in assistant_message:
+            if part.get("type") == "text" and part.get("text"):
+                assistant_message_text += part["text"] + " "
+
+        assistant_message_text = assistant_message_text.strip()
+        if not assistant_message_text:
+            raise ValueError("Assistant message must contain at least one text part")
+
+        # Fetch user OpenAI API key from Secret Manager (required)
+        try:
+            user_api_key = get_user_api_key(str(user_id), provider="openai")
+        except SecretNotFoundError:
+            logging.error(f"API key not found for user {user_id}")
+            raise InvalidAPIKeyError(
+                "User API key not found. Please configure your API key in settings."
+            )
+        except Exception as e:
+            logging.error(f"Failed to fetch user API key for {user_id}: {e}")
+            raise InvalidAPIKeyError(f"Failed to access API key: {str(e)}")
+
+        # Generate title via LLM
+        title, usage_metadata = await llm_utils.generate_chat_title(
+            user_message=user_message_text,
+            assistant_message=assistant_message_text,
+            user_api_key=user_api_key,
+            user_id=str(user_id),
+            lecture_id=str(lecture_id),
+            chat_id=str(chat_id),
+        )
+
+        return title
+
+    except Exception as e:
+        logging.error(
+            f"Error processing title generation: lecture_id={lecture_id}, "
+            f"chat_id={chat_id}, user_id={user_id}, error={e}",
             exc_info=True,
         )
         raise

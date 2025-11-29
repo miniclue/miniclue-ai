@@ -14,6 +14,7 @@ async def rewrite_query(
     user_api_key: str,
     user_id: str,
     lecture_id: str,
+    chat_id: str,
 ) -> str:
     """
     Rewrite the user's query based on conversation history using gpt-5-nano.
@@ -24,7 +25,8 @@ async def rewrite_query(
         message_history: List of message dicts with 'role' and 'text' keys (chronological order)
         user_api_key: User's OpenAI API key
         user_id: User ID for PostHog tracking
-        lecture_id: Lecture ID for PostHog trace tracking
+        lecture_id: Lecture ID for PostHog tracking
+        chat_id: Chat ID for PostHog trace tracking
 
     Returns:
         Rewritten query string optimized for semantic search retrieval
@@ -77,9 +79,11 @@ async def rewrite_query(
             model="gpt-4.1-nano",
             messages=messages_for_api,
             posthog_distinct_id=user_id,
-            posthog_trace_id=lecture_id,
+            posthog_trace_id=chat_id,
             posthog_properties={
                 "service": "chat_query_rewriter",
+                "lecture_id": lecture_id,
+                "chat_id": chat_id,
                 "history_turns": len(last_3_turns) // 2 if last_3_turns else 0,
             },
         )

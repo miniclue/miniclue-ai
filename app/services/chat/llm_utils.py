@@ -13,6 +13,7 @@ async def stream_chat_response(
     query: str,
     context_chunks: List[Dict[str, Any]],
     lecture_id: str,
+    chat_id: str,
     user_id: str,
     user_api_key: str,
     model: str,
@@ -27,6 +28,7 @@ async def stream_chat_response(
         query: Current user question
         context_chunks: RAG chunks retrieved from lecture
         lecture_id: Lecture ID for tracking
+        chat_id: Chat ID for PostHog trace tracking
         user_id: User ID for tracking
         user_api_key: User's OpenAI API key
         model: Model to use for generation
@@ -87,10 +89,11 @@ async def stream_chat_response(
             messages=messages_for_api,
             stream=True,
             posthog_distinct_id=user_id,
-            posthog_trace_id=lecture_id,
+            posthog_trace_id=chat_id,
             posthog_properties={
                 "service": "chat",
                 "lecture_id": lecture_id,
+                "chat_id": chat_id,
                 "context_chunks_count": len(context_chunks),
             },
         )
@@ -125,6 +128,100 @@ async def stream_chat_response(
         logging.error(
             f"An error occurred while calling the OpenAI API for chat: "
             f"lecture_id={lecture_id}, user_id={user_id}, model={model}, error={e}",
+            exc_info=True,
+        )
+        raise
+
+
+async def generate_chat_title(
+    user_message: str,
+    assistant_message: str,
+    user_api_key: str,
+    user_id: str,
+    lecture_id: str,
+    chat_id: str,
+) -> tuple[str, dict]:
+    """
+    Generate a concise title for a chat based on the first user message and assistant response.
+    Uses a lightweight prompt to generate a title (max 80 characters).
+
+    Args:
+        user_message: The first user message text
+        assistant_message: The first assistant response text
+        user_api_key: User's OpenAI API key
+        user_id: User ID for tracking
+        lecture_id: Lecture ID for tracking
+        chat_id: Chat ID for PostHog trace tracking
+
+    Returns:
+        Tuple of (title, usage_metadata)
+    """
+    if settings.mock_llm_calls:
+        # Mock title generation
+        combined = f"{user_message[:30]}... {assistant_message[:30]}"
+        mock_title = combined[:50] + "..." if len(combined) > 50 else combined
+        return mock_title, {}
+
+    SYSTEM_PROMPT = """Generate a concise title (maximum 80 characters) that summarizes the conversation between the user's question and the assistant's response. The title should capture the main topic or question being discussed. Be clear and descriptive. Do not include quotes, colons, or special formatting. Return only the title text."""
+
+    # Combine user question and assistant response for context
+    conversation_context = f"User: {user_message}\n\nAssistant: {assistant_message[:200]}"  # Limit assistant message length
+
+    messages_for_api = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": conversation_context},
+    ]
+
+    # Create client with user's API key
+    client = create_posthog_client(user_api_key, provider="openai")
+
+    try:
+        response = await client.chat.completions.create(
+            model="gpt-4.1-nano",  # Use lightweight model for title generation
+            messages=messages_for_api,
+            max_tokens=50,  # Limit tokens for title
+            temperature=0.7,
+            posthog_distinct_id=user_id,
+            posthog_trace_id=chat_id,
+            posthog_properties={
+                "service": "chat-title",
+                "lecture_id": lecture_id,
+                "chat_id": chat_id,
+            },
+        )
+
+        title = response.choices[0].message.content.strip()
+        # Ensure title doesn't exceed 80 characters
+        if len(title) > 80:
+            title = title[:77] + "..."
+
+        # Extract usage metadata
+        usage_metadata = {}
+        if hasattr(response, "usage"):
+            usage_metadata = {
+                "prompt_tokens": getattr(response.usage, "prompt_tokens", 0),
+                "completion_tokens": getattr(response.usage, "completion_tokens", 0),
+                "total_tokens": getattr(response.usage, "total_tokens", 0),
+            }
+
+        return title, usage_metadata
+
+    except Exception as e:
+        error_str = str(e).lower()
+        if (
+            "authentication" in error_str
+            or "unauthorized" in error_str
+            or "invalid api key" in error_str
+            or "401" in error_str
+        ):
+            logging.error(
+                f"OpenAI authentication error (invalid API key) for title generation: "
+                f"lecture_id={lecture_id}, user_id={user_id}, error={e}"
+            )
+            raise InvalidAPIKeyError(f"Invalid API key: {str(e)}") from e
+        logging.error(
+            f"An error occurred while calling the OpenAI API for title generation: "
+            f"lecture_id={lecture_id}, user_id={user_id}, error={e}",
             exc_info=True,
         )
         raise

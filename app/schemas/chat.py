@@ -19,3 +19,15 @@ class ChatRequest(BaseModel):
 class ChatStreamChunk(BaseModel):
     content: str
     done: bool
+
+
+class ChatTitleRequest(BaseModel):
+    lecture_id: UUID
+    chat_id: UUID
+    user_id: UUID
+    user_message: List[Dict[str, Any]]
+    assistant_message: List[Dict[str, Any]]
+
+
+class ChatTitleResponse(BaseModel):
+    title: str

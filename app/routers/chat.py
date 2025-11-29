@@ -4,8 +4,16 @@ import logging
 from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import StreamingResponse
 
-from app.schemas.chat import ChatRequest, ChatStreamChunk
-from app.services.chat.orchestrator import process_chat_request
+from app.schemas.chat import (
+    ChatRequest,
+    ChatStreamChunk,
+    ChatTitleRequest,
+    ChatTitleResponse,
+)
+from app.services.chat.orchestrator import (
+    process_chat_request,
+    process_title_generation,
+)
 from app.utils.secret_manager import InvalidAPIKeyError
 
 router = APIRouter(
@@ -96,4 +104,46 @@ async def handle_chat(request: ChatRequest):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to process chat request: {e}",
+        )
+
+
+@router.post("/generate-title")
+async def handle_generate_title(request: ChatTitleRequest):
+    """Generates a title for a chat based on the first user message and assistant response."""
+    try:
+        title = await process_title_generation(
+            lecture_id=request.lecture_id,
+            chat_id=request.chat_id,
+            user_id=request.user_id,
+            user_message=request.user_message,
+            assistant_message=request.assistant_message,
+        )
+        return ChatTitleResponse(title=title)
+    except InvalidAPIKeyError as e:
+        logging.error(
+            f"Invalid API key for title generation: lecture_id={request.lecture_id}, "
+            f"chat_id={request.chat_id}, user_id={request.user_id}, error={e}"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Invalid API key: {str(e)}",
+        )
+    except ValueError as e:
+        logging.error(
+            f"Validation error for title generation: lecture_id={request.lecture_id}, "
+            f"chat_id={request.chat_id}, user_id={request.user_id}, error={e}"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+    except Exception as e:
+        logging.error(
+            f"Title generation failed: lecture_id={request.lecture_id}, "
+            f"chat_id={request.chat_id}, user_id={request.user_id}, error={e}",
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate title: {e}",
         )
