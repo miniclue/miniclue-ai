@@ -11,7 +11,6 @@ settings = Settings()
 async def verify_token(request: Request, authorization: str = Header(None)):
     # For local development, bypass the authentication check.
     if settings.app_env == "local":
-        logging.info("Skipping Pub/Sub authentication for local environment")
         return
 
     # Check if the middleware is configured correctly.
@@ -78,7 +77,3 @@ async def verify_token(request: Request, authorization: str = Header(None)):
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Forbidden: token email does not match expected service account",
         )
-
-    logging.info(
-        f"✅ Pub/Sub authentication successful for endpoint: {request.url.path}"
-    )

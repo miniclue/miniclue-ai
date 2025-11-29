@@ -118,7 +118,6 @@ async def process_explanation_job(payload: ExplanationPayload):
 
         # 2. Check if explanation already exists to ensure idempotency
         if await explanation_exists(conn, slide_id):
-            logging.info(f"Explanation for slide {slide_id} already exists. Skipping.")
             return
 
         # 3. Download slide image from S3

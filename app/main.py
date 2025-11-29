@@ -15,16 +15,15 @@ from app.routers import (
 )
 
 import logging
-import time
 
+# Load configuration
+settings = Settings()
+
+# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(levelname)s:     %(message)s",
 )
-
-
-# Load configuration
-settings = Settings()
 
 
 @asynccontextmanager
@@ -48,47 +47,12 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
     """Middleware to log all incoming requests."""
 
     async def dispatch(self, request: Request, call_next):
-        start_time = time.time()
-        # Log incoming request
-        logging.info(
-            f"🌐 Incoming request: {request.method} {request.url.path} "
-            f"(from {request.client.host if request.client else 'unknown'})"
-        )
-
-        # Log headers for Pub/Sub requests
-        if request.url.path.startswith(
-            (
-                "/ingestion",
-                "/embedding",
-                "/explanation",
-                "/summary",
-                "/image-analysis",
-                "/chat",
-            )
-        ):
-            auth_header = request.headers.get("authorization", "not present")
-            logging.debug(
-                f"Authorization header: {'present' if auth_header != 'not present' else 'missing'}"
-            )
-            subscription = request.headers.get(
-                "x-goog-pubsub-subscription", "not present"
-            )
-            if subscription != "not present":
-                logging.info(f"Pub/Sub subscription: {subscription}")
-
         try:
             response = await call_next(request)
-            process_time = time.time() - start_time
-            logging.info(
-                f"✅ Request completed: {request.method} {request.url.path} "
-                f"-> {response.status_code} ({process_time:.3f}s)"
-            )
             return response
         except Exception as e:
-            process_time = time.time() - start_time
             logging.error(
-                f"❌ Request failed: {request.method} {request.url.path} "
-                f"after {process_time:.3f}s - {type(e).__name__}: {e}"
+                f"Request failed: {request.method} {request.url.path} - {type(e).__name__}: {e}"
             )
             raise
 
@@ -113,16 +77,13 @@ async def debug_config():
 # Exception handlers
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
-    logging.warning(
-        f"⚠️ HTTP {exc.status_code} error for {request.method} {request.url.path}: {exc.detail}"
-    )
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
 
 @app.exception_handler(Exception)
 async def generic_exception_handler(request: Request, exc: Exception):
     logging.error(
-        f"❌ Unhandled exception for {request.method} {request.url.path}: {type(exc).__name__}",
+        f"Unhandled exception for {request.method} {request.url.path}: {type(exc).__name__}",
         exc_info=exc,
     )
     return JSONResponse(status_code=500, content={"detail": "Internal Server Error"})

@@ -1,10 +1,11 @@
+import asyncio
 import logging
 from uuid import UUID
 from typing import AsyncGenerator
 
 import asyncpg
 
-from app.services.chat import db_utils, rag_utils, llm_utils
+from app.services.chat import db_utils, rag_utils, llm_utils, query_rewriter
 from app.utils.config import Settings
 from app.utils.secret_manager import (
     get_user_api_key,
@@ -63,33 +64,73 @@ async def process_chat_request(
             logging.error(f"Failed to fetch user API key for {user_id}: {e}")
             raise InvalidAPIKeyError(f"Failed to access API key: {str(e)}")
 
-        # Retrieve relevant chunks via RAG
+        # Fetch message history once (up to 5 turns = 10 messages) for both query rewriting and final prompt
+        # Fetch 11 messages to account for excluding the current user message, ensuring we have up to 5 turns after exclusion
+        message_history = await db_utils.get_message_history(
+            conn=conn, chat_id=chat_id, user_id=user_id, limit=11
+        )
+
+        # Exclude the most recent message if it's a user message (the current message being processed)
+        # The current user message is saved to the database before processing, so we need to exclude it
+        if message_history and message_history[-1].get("role") == "user":
+            message_history = message_history[:-1]
+
+        # Rewrite query using available history (up to last 3 turns) only if history exists
+        rewritten_query = query_text
+        if message_history:
+            try:
+                rewritten_query = await query_rewriter.rewrite_query(
+                    current_question=query_text,
+                    message_history=message_history,
+                    user_api_key=user_api_key,
+                    user_id=str(user_id),
+                    lecture_id=str(lecture_id),
+                )
+            except Exception as e:
+                logging.warning(f"Query rewriting failed, using original query: {e}")
+                # Continue with original query if rewriting fails
+
+        # Retrieve relevant chunks via RAG using rewritten query
         context_chunks = await rag_utils.retrieve_relevant_chunks(
             conn=conn,
             lecture_id=lecture_id,
-            query_text=query_text,
+            query_text=rewritten_query,
             user_api_key=user_api_key,
             user_id=user_id,
             top_k=settings.rag_top_k,
         )
 
-        logging.info(
-            f"Retrieved {len(context_chunks)} context chunks for lecture {lecture_id}"
+        # Stream LLM response with message history
+        try:
+            async for chunk in llm_utils.stream_chat_response(
+                query=query_text,
+                context_chunks=context_chunks,
+                message_history=message_history,
+                lecture_id=str(lecture_id),
+                user_id=str(user_id),
+                user_api_key=user_api_key,
+                model=model,
+            ):
+                yield chunk
+        except asyncio.CancelledError:
+            logging.warning(
+                f"Chat request cancelled: lecture_id={lecture_id}, "
+                f"chat_id={chat_id}, user_id={user_id}"
+            )
+            raise
+
+    except asyncio.CancelledError:
+        logging.warning(
+            f"Chat request cancelled: lecture_id={lecture_id}, "
+            f"chat_id={chat_id}, user_id={user_id}"
         )
-
-        # Stream LLM response
-        async for chunk in llm_utils.stream_chat_response(
-            query=query_text,
-            context_chunks=context_chunks,
-            lecture_id=str(lecture_id),
-            user_id=str(user_id),
-            user_api_key=user_api_key,
-            model=model,
-        ):
-            yield chunk
-
+        raise
     except Exception as e:
-        logging.error(f"Error processing chat request: {e}", exc_info=True)
+        logging.error(
+            f"Error processing chat request: lecture_id={lecture_id}, "
+            f"chat_id={chat_id}, user_id={user_id}, model={model}, error={e}",
+            exc_info=True,
+        )
         raise
     finally:
         if conn:

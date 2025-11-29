@@ -1,6 +1,7 @@
 import logging
+import json
 from uuid import UUID
-from typing import List
+from typing import List, Dict, Any
 
 import asyncpg
 
@@ -100,3 +101,111 @@ async def get_chunk_context(
         """,
         chunk_ids_str,
     )
+
+
+async def get_message_history(
+    conn: asyncpg.Connection, chat_id: UUID, user_id: UUID, limit: int = 10
+) -> List[Dict[str, Any]]:
+    """
+    Fetch message history from the messages table for a given chat_id.
+    Returns list of messages with role and text extracted from parts.
+    Messages are returned in chronological order (oldest first).
+
+    Note: This function explicitly checks ownership by joining with chats and lectures
+    to bypass RLS policies that require auth.uid() context.
+
+    Args:
+        conn: Database connection
+        chat_id: Chat ID to fetch messages for
+        user_id: User ID to verify ownership
+        limit: Maximum number of messages to fetch (default: 10 for 5 turns)
+
+    Returns:
+        List of message dicts: [{"role": "user|assistant", "text": "..."}]
+    """
+
+    # Fetch messages ordered by created_at DESC (newest first)
+    # Explicitly join with chats and lectures to verify ownership and bypass RLS
+    try:
+        rows = await conn.fetch(
+            """
+            SELECT m.role, m.parts, m.created_at
+            FROM messages m
+            INNER JOIN chats c ON c.id = m.chat_id
+            INNER JOIN lectures l ON l.id = c.lecture_id
+            WHERE m.chat_id = $1
+              AND c.user_id = $2
+              AND l.user_id = $2
+            ORDER BY m.created_at DESC
+            LIMIT $3
+            """,
+            chat_id,
+            user_id,
+            limit,
+        )
+    except Exception as e:
+        logging.error(
+            f"[get_message_history] Database query failed for chat_id={chat_id}, user_id={user_id}: {e}",
+            exc_info=True,
+        )
+        raise
+
+    if not rows:
+
+        return []
+
+    # Extract text from parts JSONB and build message list
+    messages = []
+    skipped_count = 0
+    for idx, row in enumerate(rows):
+        parts_raw = row["parts"]
+
+        # Parse JSONB field - asyncpg returns JSONB as string or already parsed dict/list
+        if isinstance(parts_raw, str):
+            try:
+                parts = json.loads(parts_raw)
+            except json.JSONDecodeError as e:
+                logging.warning(
+                    f"[get_message_history] Failed to parse parts JSON for row {idx+1}: {e}, parts={parts_raw}"
+                )
+                skipped_count += 1
+                continue
+        else:
+            parts = parts_raw
+
+        if not parts:
+            skipped_count += 1
+            continue
+
+        # Extract text from parts (handle both dict and list formats)
+        text_parts = []
+        if isinstance(parts, list):
+            for part in parts:
+                if isinstance(part, dict) and part.get("type") == "text":
+                    text = part.get("text", "")
+                    if text:
+                        text_parts.append(text)
+        elif isinstance(parts, dict):
+            # Handle single part as dict
+            if parts.get("type") == "text":
+                text = parts.get("text", "")
+                if text:
+                    text_parts.append(text)
+
+        # Only include messages with text content
+        if text_parts:
+            message_text = " ".join(text_parts).strip()
+            messages.append(
+                {
+                    "role": row["role"],
+                    "text": message_text,
+                }
+            )
+
+        else:
+            skipped_count += 1
+
+    # Reverse to get chronological order (oldest first)
+    messages.reverse()
+
+    return messages

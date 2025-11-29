@@ -33,7 +33,7 @@ async def analyze_image(
         with open("app/services/image_analysis/prompt.md", "r", encoding="utf-8") as f:
             system_prompt = f.read()
     except FileNotFoundError:
-        logging.error("Image analysis prompt file not found for mock generation.")
+        logging.error("Image analysis prompt file not found.")
         raise
 
     image = Image.open(BytesIO(image_bytes))
@@ -81,9 +81,6 @@ async def analyze_image(
 
         result = response.output_parsed
         if result is None:
-            logging.warning(
-                "Image analysis output_parsed was None; retrying with explicit instruction"
-            )
             retry_response = await asyncio.wait_for(
                 client.responses.parse(
                     model=settings.image_analysis_model,

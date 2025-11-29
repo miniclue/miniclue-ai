@@ -1,3 +1,4 @@
+import asyncio
 import logging
 
 from fastapi import APIRouter, HTTPException, status
@@ -34,18 +35,43 @@ async def handle_chat(request: ChatRequest):
                 # Send final done chunk
                 final_chunk = ChatStreamChunk(content="", done=True)
                 yield f"data: {final_chunk.model_dump_json()}\n\n"
+            except asyncio.CancelledError:
+                logging.warning(
+                    f"Chat stream cancelled: lecture_id={request.lecture_id}, "
+                    f"chat_id={request.chat_id}, user_id={request.user_id}"
+                )
+                # Send error chunk before raising
+                error_chunk = ChatStreamChunk(content="", done=True)
+                try:
+                    yield f"data: {error_chunk.model_dump_json()}\n\n"
+                except Exception:
+                    pass
+                raise
             except InvalidAPIKeyError as e:
-                logging.error(f"Invalid API key for chat: {e}")
+                logging.error(
+                    f"Invalid API key for chat: lecture_id={request.lecture_id}, "
+                    f"chat_id={request.chat_id}, user_id={request.user_id}, "
+                    f"model={request.model}, error={e}"
+                )
                 error_chunk = ChatStreamChunk(
                     content="Error: Invalid API key", done=True
                 )
                 yield f"data: {error_chunk.model_dump_json()}\n\n"
             except ValueError as e:
-                logging.error(f"Validation error for chat: {e}")
+                logging.error(
+                    f"Validation error for chat: lecture_id={request.lecture_id}, "
+                    f"chat_id={request.chat_id}, user_id={request.user_id}, "
+                    f"model={request.model}, error={e}"
+                )
                 error_chunk = ChatStreamChunk(content=f"Error: {str(e)}", done=True)
                 yield f"data: {error_chunk.model_dump_json()}\n\n"
             except Exception as e:
-                logging.error(f"Chat request failed: {e}", exc_info=True)
+                logging.error(
+                    f"Chat request failed: lecture_id={request.lecture_id}, "
+                    f"chat_id={request.chat_id}, user_id={request.user_id}, "
+                    f"model={request.model}, error={e}",
+                    exc_info=True,
+                )
                 error_chunk = ChatStreamChunk(
                     content="Error: Failed to process chat request", done=True
                 )
@@ -61,7 +87,12 @@ async def handle_chat(request: ChatRequest):
         )
 
     except Exception as e:
-        logging.error(f"Failed to create chat stream: {e}", exc_info=True)
+        logging.error(
+            f"Failed to create chat stream: lecture_id={request.lecture_id}, "
+            f"chat_id={request.chat_id}, user_id={request.user_id}, "
+            f"model={request.model}, error={e}",
+            exc_info=True,
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to process chat request: {e}",

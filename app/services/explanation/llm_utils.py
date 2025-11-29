@@ -111,9 +111,6 @@ Output exactly one valid JSON object with:
         # Prefer structured output parsed by the client
         result = response.output_parsed
         if result is None:
-            logging.warning(
-                "output_parsed was None; retrying with explicit structured request"
-            )
             retry_response = await asyncio.wait_for(
                 client.responses.parse(
                     model=settings.explanation_model,

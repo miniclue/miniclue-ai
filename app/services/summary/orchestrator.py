@@ -32,7 +32,6 @@ async def process_summary_job(payload: SummaryPayload):
 
         # 2. Check if summary already exists to ensure idempotency
         if await db_utils.check_summary_exists(conn, lecture_id):
-            logging.info(f"Summary for lecture {lecture_id} already exists. Skipping.")
             return
 
         # 3. Gather all slide explanations
