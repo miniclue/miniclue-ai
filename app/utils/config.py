@@ -33,6 +33,8 @@ class Settings(BaseSettings):
     image_analysis_model: str = "gpt-5-nano"
     explanation_model: str = "gpt-4o-mini"
     summary_model: str = "gpt-5-nano"
+    # RAG
+    rag_top_k: int = 5
     # Mock LLM calls
     mock_llm_calls: bool = False
     # Server

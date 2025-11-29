@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 
 from app.utils.config import Settings
 from app.routers import (
+    chat,
     embedding,
     explanation,
     ingestion,
@@ -33,7 +34,7 @@ async def lifespan(app: FastAPI):
     logging.info(f"🚀 MiniClue AI Service starting on {settings.host}:{settings.port}")
     logging.info(f"Environment: {settings.app_env}")
     logging.info(
-        "Routers registered: /ingestion, /embedding, /explanation, /summary, /image-analysis"
+        "Routers registered: /ingestion, /embedding, /explanation, /summary, /image-analysis, /chat"
     )
     yield
     # Shutdown (if needed in the future)
@@ -56,7 +57,14 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
 
         # Log headers for Pub/Sub requests
         if request.url.path.startswith(
-            ("/ingestion", "/embedding", "/explanation", "/summary", "/image-analysis")
+            (
+                "/ingestion",
+                "/embedding",
+                "/explanation",
+                "/summary",
+                "/image-analysis",
+                "/chat",
+            )
         ):
             auth_header = request.headers.get("authorization", "not present")
             logging.debug(
@@ -126,3 +134,4 @@ app.include_router(embedding.router)
 app.include_router(explanation.router)
 app.include_router(summary.router)
 app.include_router(image_analysis.router)
+app.include_router(chat.router)
