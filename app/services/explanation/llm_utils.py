@@ -90,8 +90,6 @@ Output exactly one valid JSON object with:
                 model=settings.explanation_model,
                 instructions=system_prompt,
                 input=[{"role": "user", "content": user_message_content}],
-                # reasoning={"effort": "minimal"},
-                # text={"verbosity": "high"},
                 text_format=ExplanationResult,
                 posthog_distinct_id=customer_identifier,
                 posthog_trace_id=lecture_id,
@@ -120,8 +118,6 @@ Output exactly one valid JSON object with:
                             "content": "Return a valid JSON object matching the 'ExplanationResult' schema.",
                         }
                     ],
-                    reasoning={"effort": "low"},
-                    text={"verbosity": "low"},
                     text_format=ExplanationResult,
                     previous_response_id=response.id,
                     posthog_distinct_id=customer_identifier,

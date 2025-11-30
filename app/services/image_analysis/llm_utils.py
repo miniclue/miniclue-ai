@@ -62,8 +62,6 @@ async def analyze_image(
                         ],
                     },
                 ],
-                reasoning={"effort": "low"},
-                text={"verbosity": "low"},
                 text_format=ImageAnalysisResult,
                 posthog_distinct_id=customer_identifier,
                 posthog_trace_id=lecture_id,
@@ -90,8 +88,6 @@ async def analyze_image(
                             "content": "Return a valid JSON object matching the 'ImageAnalysisResult' schema.",
                         }
                     ],
-                    reasoning={"effort": "low"},
-                    text={"verbosity": "low"},
                     text_format=ImageAnalysisResult,
                     previous_response_id=response.id,
                     posthog_distinct_id=customer_identifier,

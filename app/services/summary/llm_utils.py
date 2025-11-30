@@ -55,8 +55,6 @@ async def generate_summary(
             model=settings.summary_model,
             instructions=system_prompt,
             input=[{"role": "user", "content": user_message_content}],
-            reasoning={"effort": "minimal"},
-            text={"verbosity": "low"},
             posthog_distinct_id=customer_identifier,
             posthog_trace_id=lecture_id,
             posthog_properties={
