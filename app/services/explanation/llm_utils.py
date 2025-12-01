@@ -1,4 +1,5 @@
 import base64
+import json
 import logging
 import asyncio
 from typing import Optional
@@ -9,6 +10,7 @@ from pydantic import ValidationError
 from app.schemas.explanation import ExplanationResult
 from app.utils.config import Settings
 from app.utils.secret_manager import InvalidAPIKeyError
+from app.utils.llm_utils import extract_text_from_response
 
 
 # Constants
@@ -138,12 +140,18 @@ async def generate_explanation(
             timeout=INITIAL_REQUEST_TIMEOUT,
         )
 
-        result = response.output_parsed
-        if result is not None:
-            return result, _extract_metadata(response)
+        # Extract and parse structured output
+        response_text = extract_text_from_response(response)
+        if response_text:
+            try:
+                result = ExplanationResult.model_validate_json(response_text)
+                return result, _extract_metadata(response)
+            except (json.JSONDecodeError, ValidationError):
+                logging.warning(
+                    "Failed to parse initial response as structured output. Retrying..."
+                )
 
         # Retry with explicit schema request
-        logging.warning("Initial response missing structured output. Retrying...")
         retry_properties = _create_posthog_properties(
             lecture_id, slide_id, slide_number, total_slides, name, email, is_retry=True
         )
@@ -164,9 +172,14 @@ async def generate_explanation(
             timeout=RETRY_REQUEST_TIMEOUT,
         )
 
-        result = retry_response.output_parsed
-        if result is not None:
-            return result, _extract_metadata(retry_response)
+        # Extract and parse structured output from retry
+        retry_text = extract_text_from_response(retry_response)
+        if retry_text:
+            try:
+                result = ExplanationResult.model_validate_json(retry_text)
+                return result, _extract_metadata(retry_response)
+            except (json.JSONDecodeError, ValidationError):
+                logging.warning("Failed to parse retry response as structured output.")
 
         # Both attempts failed - return fallback
         logging.error("Retry failed to produce structured output. Returning fallback.")
