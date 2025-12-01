@@ -5,7 +5,34 @@ from app.utils.config import Settings
 from app.utils.posthog_client import create_posthog_client
 from app.utils.secret_manager import InvalidAPIKeyError
 
+# Constants
+QUERY_REWRITER_MODEL = "gpt-4.1-nano"
+HISTORY_TURNS_COUNT = 3
+MESSAGES_PER_TURN = 2
+
+# Initialize settings
 settings = Settings()
+
+
+def _is_authentication_error(error: Exception) -> bool:
+    """Checks if the error is related to authentication/invalid API key."""
+    error_str = str(error).lower()
+    auth_indicators = ["authentication", "unauthorized", "invalid api key", "401"]
+    return any(indicator in error_str for indicator in auth_indicators)
+
+
+def _create_query_rewriter_posthog_properties(
+    lecture_id: str,
+    chat_id: str,
+    history_turns: int,
+) -> dict:
+    """Creates PostHog properties dictionary for query rewriter tracking."""
+    return {
+        "service": "chat_query_rewriter",
+        "lecture_id": lecture_id,
+        "chat_id": chat_id,
+        "history_turns": history_turns,
+    }
 
 
 async def rewrite_query(
@@ -17,7 +44,7 @@ async def rewrite_query(
     chat_id: str,
 ) -> str:
     """
-    Rewrite the user's query based on conversation history using gpt-5-nano.
+    Rewrite the user's query based on conversation history using Responses API.
     Extracts last 3 turns (6 messages) from the provided history.
 
     Args:
@@ -32,59 +59,56 @@ async def rewrite_query(
         Rewritten query string optimized for semantic search retrieval
     """
 
-    # Build rewriting prompt
-    # New system prompt variable
     REWRITING_SYSTEM_PROMPT = """You are an expert Query Rewriting Assistant for a Retrieval-Augmented Generation (RAG) system.
-    Your task is to take the current user question and the preceding conversation history, and rewrite the current question into a **clear, standalone, self-contained query** that is highly optimized for semantic search retrieval.
+Your task is to take the current user question and the preceding conversation history, and rewrite the current question into a **clear, standalone, self-contained query** that is highly optimized for semantic search retrieval.
 
-    Instructions:
-    1.  **Resolve Co-references:** Replace vague terms like "it," "that," or "this" with the full entity name mentioned earlier in the history.
-    2.  **Be Comprehensive:** The rewritten query must stand on its own and make sense without needing the history.
-    3.  **Optimize for Retrieval:** Focus on keywords and concepts from the user's question and history.
-    4.  **Output Format:** Respond ONLY with the single, rewritten query string, and nothing else."""
+Instructions:
+1.  **Resolve Co-references:** Replace vague terms like "it," "that," or "this" with the full entity name mentioned earlier in the history.
+2.  **Be Comprehensive:** The rewritten query must stand on its own and make sense without needing the history.
+3.  **Optimize for Retrieval:** Focus on keywords and concepts from the user's question and history.
+4.  **Output Format:** Respond ONLY with the single, rewritten query string, and nothing else."""
 
-    # Start with the instruction-based System Prompt
-    messages_for_api = [
-        {"role": "system", "content": REWRITING_SYSTEM_PROMPT},
-    ]
-
-    # Add last 3 turns (6 messages) directly to the list
-    # The loop structure is sound, but we will simplify how we build the list.
-    last_3_turns = (
-        message_history[-6:] if len(message_history) >= 6 else message_history
+    # Extract last 3 turns (6 messages) from history
+    max_messages = HISTORY_TURNS_COUNT * MESSAGES_PER_TURN
+    last_turns = (
+        message_history[-max_messages:]
+        if len(message_history) >= max_messages
+        else message_history
     )
 
-    for msg in last_3_turns:
-        # Note: The 'role' from the input dict matches the expected OpenAI role
-        messages_for_api.append({"role": msg["role"], "content": msg["text"]})
+    # Build input messages for responses API
+    input_messages = []
 
-    # Add the final message with the current question and the explicit instruction for the LLM
-    # The model will see the history, then the new question, and then the prompt asks for the rewrite.
-    messages_for_api.append(
+    # Add last turns directly to the list
+    for msg in last_turns:
+        input_messages.append({"role": msg["role"], "content": msg["text"]})
+
+    # Add the final message with the current question and explicit instruction
+    input_messages.append(
         {
             "role": "user",
             "content": f"The final question to rewrite is: {current_question}\n\nRewritten Query:",
         }
     )
 
-    # Create client with user's API key
+    history_turns = len(last_turns) // MESSAGES_PER_TURN if last_turns else 0
+    posthog_properties = _create_query_rewriter_posthog_properties(
+        lecture_id, chat_id, history_turns
+    )
+
     client = create_posthog_client(user_api_key, provider="openai")
 
     try:
-        response = await client.chat.completions.create(
-            model="gpt-4.1-nano",
-            messages=messages_for_api,
+        response = await client.responses.create(
+            model=QUERY_REWRITER_MODEL,
+            instructions=REWRITING_SYSTEM_PROMPT,
+            input=input_messages,
             posthog_distinct_id=user_id,
             posthog_trace_id=chat_id,
-            posthog_properties={
-                "service": "chat_query_rewriter",
-                "lecture_id": lecture_id,
-                "chat_id": chat_id,
-                "history_turns": len(last_3_turns) // 2 if last_3_turns else 0,
-            },
+            posthog_properties=posthog_properties,
         )
 
-        rewritten_query = response.choices[0].message.content.strip()
+        rewritten_query = response.output_text.strip()
 
         if not rewritten_query:
             logging.warning(
@@ -95,14 +119,7 @@ async def rewrite_query(
         return rewritten_query
 
     except Exception as e:
-        # Check if it's an authentication error (invalid API key)
-        error_str = str(e).lower()
-        if (
-            "authentication" in error_str
-            or "unauthorized" in error_str
-            or "invalid api key" in error_str
-            or "401" in error_str
-        ):
+        if _is_authentication_error(e):
             logging.error(
                 f"OpenAI authentication error in query rewriter: "
                 f"user_id={user_id}, error={e}"

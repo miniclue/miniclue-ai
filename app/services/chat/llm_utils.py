@@ -6,7 +6,57 @@ from app.utils.config import Settings
 from app.utils.posthog_client import create_posthog_client
 from app.utils.secret_manager import InvalidAPIKeyError
 
+# Constants
+TITLE_MAX_LENGTH = 80
+TITLE_MODEL = "gpt-4.1-nano"
+TITLE_MAX_TOKENS = 50
+TITLE_TEMPERATURE = 0.7
+ASSISTANT_MESSAGE_PREVIEW_LENGTH = 200
+
+# Initialize settings
 settings = Settings()
+
+
+def _is_authentication_error(error: Exception) -> bool:
+    """Checks if the error is related to authentication/invalid API key."""
+    error_str = str(error).lower()
+    auth_indicators = ["authentication", "unauthorized", "invalid api key", "401"]
+    return any(indicator in error_str for indicator in auth_indicators)
+
+
+def _extract_metadata(response) -> dict:
+    """Extracts metadata from LLM response."""
+    return {
+        "model": response.model,
+        "usage": response.usage.model_dump() if response.usage else None,
+        "response_id": response.id,
+    }
+
+
+def _create_chat_posthog_properties(
+    lecture_id: str,
+    chat_id: str,
+    context_chunks_count: int,
+) -> dict:
+    """Creates PostHog properties dictionary for chat tracking."""
+    return {
+        "service": "chat",
+        "lecture_id": lecture_id,
+        "chat_id": chat_id,
+        "context_chunks_count": context_chunks_count,
+    }
+
+
+def _create_title_posthog_properties(
+    lecture_id: str,
+    chat_id: str,
+) -> dict:
+    """Creates PostHog properties dictionary for title generation tracking."""
+    return {
+        "service": "chat-title",
+        "lecture_id": lecture_id,
+        "chat_id": chat_id,
+    }
 
 
 async def stream_chat_response(
@@ -20,7 +70,7 @@ async def stream_chat_response(
     message_history: List[Dict[str, Any]] | None = None,
 ) -> AsyncGenerator[str, None]:
     """
-    Stream chat response using OpenAI streaming API.
+    Stream chat response using OpenAI Responses API streaming.
     Builds prompt with lecture context from RAG chunks and message history.
     Yields text chunks as they arrive.
 
@@ -55,44 +105,58 @@ async def stream_chat_response(
 --- END LECTURE CONTEXT ---
 """
 
-    messages_for_api = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-    ]
+    # Build input messages for responses API
+    input_messages = []
 
     # Add message history directly to the list
     if message_history:
         # Append the last 5 turns directly as history
         # The current message_history list is assumed to be ordered oldest to newest.
         for msg in message_history:
-            messages_for_api.append({"role": msg["role"], "content": msg["text"]})
+            input_messages.append({"role": msg["role"], "content": msg["text"]})
 
     # Add the current user query as the final message
-    messages_for_api.append({"role": "user", "content": query})
+    input_messages.append({"role": "user", "content": query})
 
     # Create client with user's API key
     client = create_posthog_client(user_api_key, provider="openai")
 
+    posthog_properties = _create_chat_posthog_properties(
+        lecture_id, chat_id, len(context_chunks)
+    )
+
     stream = None
     try:
-        stream = await client.chat.completions.create(
+        stream = await client.responses.create(
             model=model,
-            messages=messages_for_api,
+            instructions=SYSTEM_PROMPT,
+            input=input_messages,
             stream=True,
             posthog_distinct_id=user_id,
             posthog_trace_id=chat_id,
-            posthog_properties={
-                "service": "chat",
-                "lecture_id": lecture_id,
-                "chat_id": chat_id,
-                "context_chunks_count": len(context_chunks),
-            },
+            posthog_properties=posthog_properties,
         )
 
-        async for chunk in stream:
-            if chunk.choices and len(chunk.choices) > 0:
-                delta = chunk.choices[0].delta
-                if delta.content:
-                    yield delta.content
+        async for event in stream:
+            # Handle streaming events from responses API
+            # The responses API uses semantic events with a type attribute
+            # Look for output_text.delta events which contain text chunks
+            if hasattr(event, "type"):
+                event_type = getattr(event, "type", None)
+                if event_type == "response.output_text.delta":
+                    # Extract delta text from the event
+                    if hasattr(event, "delta") and event.delta:
+                        yield event.delta
+                    elif hasattr(event, "text") and event.text:
+                        yield event.text
+                elif event_type == "response.output_text.done":
+                    # Stream completed
+                    break
+            # Fallback: check for common attributes directly (for compatibility)
+            elif hasattr(event, "delta") and event.delta:
+                yield event.delta
+            elif hasattr(event, "text") and event.text:
+                yield event.text
 
     except asyncio.CancelledError:
         logging.warning(
@@ -102,14 +166,7 @@ async def stream_chat_response(
         # Re-raise to allow FastAPI to handle the cancellation properly
         raise
     except Exception as e:
-        # Check if it's an authentication error (invalid API key)
-        error_str = str(e).lower()
-        if (
-            "authentication" in error_str
-            or "unauthorized" in error_str
-            or "invalid api key" in error_str
-            or "401" in error_str
-        ):
+        if _is_authentication_error(e):
             logging.error(
                 f"OpenAI authentication error (invalid API key): "
                 f"lecture_id={lecture_id}, user_id={user_id}, model={model}, error={e}"
@@ -147,58 +204,40 @@ async def generate_chat_title(
         Tuple of (title, usage_metadata)
     """
 
-    SYSTEM_PROMPT = """Generate a concise title (maximum 80 characters) that summarizes the conversation between the user's question and the assistant's response. The title should capture the main topic or question being discussed. Be clear and descriptive. Do not include quotes, colons, or special formatting. Return only the title text."""
+    SYSTEM_PROMPT = f"""Generate a concise title (maximum {TITLE_MAX_LENGTH} characters) that summarizes the conversation between the user's question and the assistant's response. The title should capture the main topic or question being discussed. Be clear and descriptive. Do not include quotes, colons, or special formatting. Return only the title text."""
 
     # Combine user question and assistant response for context
-    conversation_context = f"User: {user_message}\n\nAssistant: {assistant_message[:200]}"  # Limit assistant message length
+    conversation_context = f"User: {user_message}\n\nAssistant: {assistant_message[:ASSISTANT_MESSAGE_PREVIEW_LENGTH]}"
 
-    messages_for_api = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": conversation_context},
-    ]
+    input_messages = [{"role": "user", "content": conversation_context}]
 
-    # Create client with user's API key
+    posthog_properties = _create_title_posthog_properties(lecture_id, chat_id)
+
     client = create_posthog_client(user_api_key, provider="openai")
 
     try:
-        response = await client.chat.completions.create(
-            model="gpt-4.1-nano",  # Use lightweight model for title generation
-            messages=messages_for_api,
-            max_tokens=50,  # Limit tokens for title
-            temperature=0.7,
+        response = await client.responses.create(
+            model=TITLE_MODEL,
+            instructions=SYSTEM_PROMPT,
+            input=input_messages,
+            max_tokens=TITLE_MAX_TOKENS,
+            temperature=TITLE_TEMPERATURE,
             posthog_distinct_id=user_id,
             posthog_trace_id=chat_id,
-            posthog_properties={
-                "service": "chat-title",
-                "lecture_id": lecture_id,
-                "chat_id": chat_id,
-            },
+            posthog_properties=posthog_properties,
         )
 
-        title = response.choices[0].message.content.strip()
-        # Ensure title doesn't exceed 80 characters
-        if len(title) > 80:
-            title = title[:77] + "..."
+        title = response.output_text.strip()
+        # Ensure title doesn't exceed max length
+        if len(title) > TITLE_MAX_LENGTH:
+            title = title[: TITLE_MAX_LENGTH - 3] + "..."
 
-        # Extract usage metadata
-        usage_metadata = {}
-        if hasattr(response, "usage"):
-            usage_metadata = {
-                "prompt_tokens": getattr(response.usage, "prompt_tokens", 0),
-                "completion_tokens": getattr(response.usage, "completion_tokens", 0),
-                "total_tokens": getattr(response.usage, "total_tokens", 0),
-            }
+        usage_metadata = _extract_metadata(response)
 
         return title, usage_metadata
 
     except Exception as e:
-        error_str = str(e).lower()
-        if (
-            "authentication" in error_str
-            or "unauthorized" in error_str
-            or "invalid api key" in error_str
-            or "401" in error_str
-        ):
+        if _is_authentication_error(e):
             logging.error(
                 f"OpenAI authentication error (invalid API key) for title generation: "
                 f"lecture_id={lecture_id}, user_id={user_id}, error={e}"
