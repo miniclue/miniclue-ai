@@ -133,7 +133,9 @@ async def process_slide_sub_images(
 
         except Exception as e:
             logging.error(
-                f"Failed to process sub-image with xref {xref} on slide {slide_number}: {e}"
+                f"Failed to process sub-image with xref {xref} on slide {slide_number}: {e}",
+                exc_info=True,
             )
+            # Continue processing other images even if one fails
             continue
     return image_analysis_jobs

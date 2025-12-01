@@ -1,6 +1,5 @@
 import logging
 from uuid import UUID
-from typing import Optional, Tuple
 import json
 
 import asyncpg
@@ -33,35 +32,6 @@ async def explanation_exists(conn: asyncpg.Connection, slide_id: UUID) -> bool:
     )
 
 
-async def get_slide_context(
-    conn: asyncpg.Connection, lecture_id: UUID, current_slide_number: int
-) -> Tuple[Optional[str], Optional[str]]:
-    """
-    Fetches the raw text of the previous and next slides for context.
-    """
-    # Fetch previous slide's text
-    prev_text = await conn.fetchval(
-        """
-        SELECT raw_text FROM slides
-        WHERE lecture_id = $1 AND slide_number = $2
-        """,
-        lecture_id,
-        current_slide_number - 1,
-    )
-
-    # Fetch next slide's text
-    next_text = await conn.fetchval(
-        """
-        SELECT raw_text FROM slides
-        WHERE lecture_id = $1 AND slide_number = $2
-        """,
-        lecture_id,
-        current_slide_number + 1,
-    )
-
-    return prev_text, next_text
-
-
 async def save_explanation(
     conn: asyncpg.Connection,
     slide_id: UUID,
@@ -72,19 +42,17 @@ async def save_explanation(
 ) -> None:
     """Saves the AI's explanation and metadata to the 'explanations' table."""
     safe_content = sanitize_text(result.explanation) or ""
-    safe_one_liner = sanitize_text(result.one_liner) or ""
     safe_metadata = sanitize_json(metadata) if metadata is not None else {}
     await conn.execute(
         """
-        INSERT INTO explanations (slide_id, lecture_id, slide_number, content, one_liner, slide_type, metadata)
-        VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+        INSERT INTO explanations (slide_id, lecture_id, slide_number, content, slide_type, metadata)
+        VALUES ($1, $2, $3, $4, $5, $6::jsonb)
         ON CONFLICT (slide_id) DO NOTHING
         """,
         slide_id,
         lecture_id,
         slide_number,
         safe_content,
-        safe_one_liner,
         result.slide_purpose,
         json.dumps(safe_metadata),
     )

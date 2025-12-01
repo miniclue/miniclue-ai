@@ -65,20 +65,14 @@ async def process_summary_job(payload: SummaryPayload):
             raise InvalidAPIKeyError(f"Failed to access API key: {str(e)}")
 
         # 6. Call the AI model to synthesize the explanations into a summary
-        if settings.mock_llm_calls:
-            summary_content, metadata = llm_utils.mock_generate_summary(
-                explanations,
-                str(lecture_id),
-            )
-        else:
-            summary_content, metadata = await llm_utils.generate_summary(
-                explanations,
-                str(lecture_id),
-                payload.customer_identifier,
-                user_api_key,
-                payload.name,
-                payload.email,
-            )
+        summary_content, metadata = await llm_utils.generate_summary(
+            explanations,
+            str(lecture_id),
+            payload.customer_identifier,
+            user_api_key,
+            payload.name,
+            payload.email,
+        )
         # Log LLM call for summary
         try:
             usage = metadata.get("usage") or {}

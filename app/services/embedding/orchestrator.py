@@ -88,18 +88,12 @@ async def process_embedding_job(payload: EmbeddingPayload):
             raise InvalidAPIKeyError(f"Failed to access API key: {str(e)}")
 
         # 5. Generate embeddings in a batch, capturing metadata
-        if settings.mock_llm_calls:
-            embedding_results, metadata = llm_utils.mock_generate_embeddings(
-                enriched_texts,
-                str(lecture_id),
-            )
-        else:
-            embedding_results, metadata = await llm_utils.generate_embeddings(
-                enriched_texts,
-                str(lecture_id),
-                payload.customer_identifier,
-                user_api_key,
-            )
+        embedding_results, metadata = await llm_utils.generate_embeddings(
+            enriched_texts,
+            str(lecture_id),
+            payload.customer_identifier,
+            user_api_key,
+        )
         # Log LLM call for embedding using the returned metadata
         try:
             usage = metadata.get("usage", {}) if metadata else {}

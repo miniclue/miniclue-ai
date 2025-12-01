@@ -15,18 +15,17 @@ class ExplanationPayload(BaseModel):
     email: Optional[str] = None
 
 
+class SlidePurpose(str, Enum):
+    cover = "cover"
+    header = "header"
+    content = "content"
+    error = "error"
+
+
 class ExplanationResult(BaseModel):
-    explanation: str = Field(
-        ..., description="Detailed explanation of the slide's content."
-    )
-    one_liner: str = Field(..., description="A one-sentence summary of the slide.")
-
-    class SlidePurpose(str, Enum):
-        cover = "cover"
-        header = "header"
-        content = "content"
-        error = "error"
-
     slide_purpose: SlidePurpose = Field(
-        ..., description="The purpose of the slide in the context of the presentation."
+        ..., description="The structural role of this slide."
+    )
+    explanation: str = Field(
+        ..., description="The lecture slide explanation in Markdown format with LaTeX."
     )

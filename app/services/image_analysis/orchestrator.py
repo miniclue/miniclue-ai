@@ -85,22 +85,15 @@ async def process_image_analysis_job(
 
         # 5. Analyze image with OpenAI
         # Perform image analysis and capture metadata
-        if settings.mock_llm_calls:
-            analysis_result, metadata = llm_utils.mock_analyze_image(
-                image_bytes,
-                str(lecture_id),
-                str(slide_image_id),
-            )
-        else:
-            analysis_result, metadata = await llm_utils.analyze_image(
-                image_bytes=image_bytes,
-                lecture_id=str(lecture_id),
-                slide_image_id=str(slide_image_id),
-                customer_identifier=customer_identifier,
-                name=name,
-                email=email,
-                user_api_key=user_api_key,
-            )
+        analysis_result, metadata = await llm_utils.analyze_image(
+            image_bytes=image_bytes,
+            lecture_id=str(lecture_id),
+            slide_image_id=str(slide_image_id),
+            customer_identifier=customer_identifier,
+            name=name,
+            email=email,
+            user_api_key=user_api_key,
+        )
         # Log LLM call for image analysis
         try:
             # Extract token usage from metadata

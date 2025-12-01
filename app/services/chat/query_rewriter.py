@@ -67,10 +67,6 @@ async def rewrite_query(
         }
     )
 
-    if settings.mock_llm_calls:
-        # Mock rewritten query
-        return current_question
-
     # Create client with user's API key
     client = create_posthog_client(user_api_key, provider="openai")
 

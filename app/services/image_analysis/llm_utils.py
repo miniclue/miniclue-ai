@@ -4,7 +4,6 @@ import logging
 from io import BytesIO
 from PIL import Image
 from typing import Optional
-import uuid
 
 from pydantic import ValidationError
 
@@ -13,8 +12,70 @@ from app.utils.config import Settings
 from app.utils.posthog_client import create_posthog_client
 from app.utils.secret_manager import InvalidAPIKeyError
 
-# Initialize settings and client at the module level
+# Constants
+INITIAL_REQUEST_TIMEOUT = 60.0
+RETRY_REQUEST_TIMEOUT = 30.0
+PROMPT_FILE_PATH = "app/services/image_analysis/prompt.md"
+RETRY_PROMPT = "Return a valid JSON object matching the 'ImageAnalysisResult' schema."
+
+# Initialize settings
 settings = Settings()
+
+
+def _load_system_prompt() -> str:
+    """Loads the system prompt from the prompt file."""
+    try:
+        with open(PROMPT_FILE_PATH, "r", encoding="utf-8") as f:
+            return f.read()
+    except FileNotFoundError:
+        logging.error("Image analysis prompt file not found.")
+        raise
+
+
+def _create_posthog_properties(
+    lecture_id: str,
+    slide_image_id: str,
+    image_size_bytes: int,
+    name: Optional[str],
+    email: Optional[str],
+    is_retry: bool = False,
+) -> dict:
+    """Creates PostHog properties dictionary for tracking."""
+    properties = {
+        "service": "image_analysis",
+        "lecture_id": lecture_id,
+        "slide_image_id": slide_image_id,
+        "image_size_bytes": image_size_bytes,
+        "customer_name": name,
+        "customer_email": email,
+    }
+    if is_retry:
+        properties["retry"] = True
+    return properties
+
+
+def _extract_metadata(response, is_fallback: bool = False) -> dict:
+    """Extracts metadata from LLM response."""
+    metadata = {
+        "model": response.model,
+        "usage": response.usage.model_dump() if response.usage else None,
+        "response_id": response.id,
+    }
+    if is_fallback:
+        metadata["fallback"] = True
+    return metadata
+
+
+def _create_fallback_response() -> ImageAnalysisResult:
+    """Creates a fallback response when LLM fails to produce structured output."""
+    return ImageAnalysisResult(type="content", ocr_text="", alt_text="")
+
+
+def _is_authentication_error(error: Exception) -> bool:
+    """Checks if the error is related to authentication/invalid API key."""
+    error_str = str(error).lower()
+    auth_indicators = ["authentication", "unauthorized", "invalid api key", "401"]
+    return any(indicator in error_str for indicator in auth_indicators)
 
 
 async def analyze_image(
@@ -27,14 +88,26 @@ async def analyze_image(
     email: Optional[str] = None,
 ) -> tuple[ImageAnalysisResult, dict]:
     """
-    Analyzes an image using OpenAI Responses API with structured outputs
+    Analyzes an image using OpenAI Responses API with structured outputs.
+
+    Args:
+        image_bytes: The byte content of the image to analyze.
+        lecture_id: Unique identifier for the lecture.
+        slide_image_id: Unique identifier for the slide image.
+        customer_identifier: Unique identifier for the customer.
+        user_api_key: User's API key for the LLM provider.
+        name: Optional customer name for tracking.
+        email: Optional customer email for tracking.
+
+    Returns:
+        A tuple containing an ImageAnalysisResult object and a metadata dictionary.
+
+    Raises:
+        ValueError: If the request times out or response validation fails.
+        InvalidAPIKeyError: If the API key is invalid.
+        FileNotFoundError: If the prompt file is not found.
     """
-    try:
-        with open("app/services/image_analysis/prompt.md", "r", encoding="utf-8") as f:
-            system_prompt = f.read()
-    except FileNotFoundError:
-        logging.error("Image analysis prompt file not found.")
-        raise
+    system_prompt = _load_system_prompt()
 
     image = Image.open(BytesIO(image_bytes))
     image_mime_type = f"image/{image.format.lower() or 'png'}"
@@ -42,7 +115,10 @@ async def analyze_image(
     base64_image = base64.b64encode(image_bytes).decode("utf-8")
     data_url = f"data:{image_mime_type};base64,{base64_image}"
 
-    # Create client with user's API key
+    posthog_properties = _create_posthog_properties(
+        lecture_id, slide_image_id, len(image_bytes), name, email
+    )
+
     client = create_posthog_client(user_api_key, provider="openai")
 
     try:
@@ -65,69 +141,43 @@ async def analyze_image(
                 text_format=ImageAnalysisResult,
                 posthog_distinct_id=customer_identifier,
                 posthog_trace_id=lecture_id,
-                posthog_properties={
-                    "service": "image_analysis",
-                    "lecture_id": lecture_id,
-                    "slide_image_id": slide_image_id,
-                    "image_size_bytes": len(image_bytes),
-                    "customer_name": name,
-                    "customer_email": email,
-                },
+                posthog_properties=posthog_properties,
             ),
-            timeout=60.0,
+            timeout=INITIAL_REQUEST_TIMEOUT,
         )
 
         result = response.output_parsed
-        if result is None:
-            retry_response = await asyncio.wait_for(
-                client.responses.parse(
-                    model=settings.image_analysis_model,
-                    input=[
-                        {
-                            "role": "user",
-                            "content": "Return a valid JSON object matching the 'ImageAnalysisResult' schema.",
-                        }
-                    ],
-                    text_format=ImageAnalysisResult,
-                    previous_response_id=response.id,
-                    posthog_distinct_id=customer_identifier,
-                    posthog_trace_id=lecture_id,
-                    posthog_properties={
-                        "service": "image_analysis",
-                        "lecture_id": lecture_id,
-                        "slide_image_id": slide_image_id,
-                        "image_size_bytes": len(image_bytes),
-                        "customer_name": name,
-                        "customer_email": email,
-                        "retry": True,
-                    },
-                ),
-                timeout=30.0,
-            )
-            result = retry_response.output_parsed
-            if result is None:
-                logging.error(
-                    "Retry failed to produce structured output; creating fallback ImageAnalysisResult"
-                )
-                result = ImageAnalysisResult(type="content", ocr_text="", alt_text="")
-                metadata = {
-                    "model": retry_response.model,
-                    "usage": (
-                        retry_response.usage.model_dump()
-                        if retry_response.usage
-                        else None
-                    ),
-                    "response_id": retry_response.id,
-                    "fallback": True,
-                }
-                return result, metadata
+        if result is not None:
+            return result, _extract_metadata(response)
 
-        metadata = {
-            "model": response.model,
-            "usage": response.usage.model_dump() if response.usage else None,
-            "response_id": response.id,
-        }
-        return result, metadata
+        # Retry with explicit schema request
+        logging.warning("Initial response missing structured output. Retrying...")
+        retry_properties = _create_posthog_properties(
+            lecture_id, slide_image_id, len(image_bytes), name, email, is_retry=True
+        )
+
+        retry_response = await asyncio.wait_for(
+            client.responses.parse(
+                model=settings.image_analysis_model,
+                input=[{"role": "user", "content": RETRY_PROMPT}],
+                text_format=ImageAnalysisResult,
+                previous_response_id=response.id,
+                posthog_distinct_id=customer_identifier,
+                posthog_trace_id=lecture_id,
+                posthog_properties=retry_properties,
+            ),
+            timeout=RETRY_REQUEST_TIMEOUT,
+        )
+
+        result = retry_response.output_parsed
+        if result is not None:
+            return result, _extract_metadata(retry_response)
+
+        # Both attempts failed - return fallback
+        logging.error("Retry failed to produce structured output. Returning fallback.")
+        return _create_fallback_response(), _extract_metadata(
+            retry_response, is_fallback=True
+        )
 
     except asyncio.TimeoutError:
         logging.error("Timeout occurred while calling the AI model for image analysis")
@@ -140,38 +190,10 @@ async def analyze_image(
             "Image analysis response did not match the expected format."
         ) from e
     except Exception as e:
-        # Check if it's an authentication error (invalid API key)
-        error_str = str(e).lower()
-        if (
-            "authentication" in error_str
-            or "unauthorized" in error_str
-            or "invalid api key" in error_str
-            or "401" in error_str
-        ):
+        if _is_authentication_error(e):
             logging.error(f"OpenAI authentication error (invalid API key): {e}")
             raise InvalidAPIKeyError(f"Invalid API key: {str(e)}") from e
         logging.error(
             "An unexpected error occurred during image analysis.", exc_info=True
         )
         raise
-
-
-def mock_analyze_image(
-    image_bytes: bytes, lecture_id: str, slide_image_id: str
-) -> tuple[ImageAnalysisResult, dict]:
-    """
-    Mock function for image analysis for development and testing.
-    """
-    # Create a mock result and metadata for testing
-    result = ImageAnalysisResult(
-        type="content",
-        ocr_text="This is mock OCR text from the image.",
-        alt_text="This is a mock alt text describing the image.",
-    )
-    metadata = {
-        "model": "mock-image-analysis-model",
-        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
-        "response_id": f"mock_response_{uuid.uuid4()}",
-        "mock": True,
-    }
-    return result, metadata

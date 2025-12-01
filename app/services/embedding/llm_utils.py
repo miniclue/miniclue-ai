@@ -1,13 +1,37 @@
 import json
 import logging
-import random
 from typing import List, Dict, Any, Tuple
 
 from app.utils.config import Settings
 from app.utils.posthog_client import create_posthog_client
 from app.utils.secret_manager import InvalidAPIKeyError
 
+# Initialize settings
 settings = Settings()
+
+
+def _create_posthog_properties(lecture_id: str, texts_count: int) -> dict:
+    """Creates PostHog properties dictionary for tracking."""
+    return {
+        "service": "embedding",
+        "lecture_id": lecture_id,
+        "texts_count": texts_count,
+    }
+
+
+def _extract_metadata(response) -> Dict[str, Any]:
+    """Extracts metadata from embeddings response."""
+    return {
+        "model": response.model,
+        "usage": response.usage.model_dump(),
+    }
+
+
+def _is_authentication_error(error: Exception) -> bool:
+    """Checks if the error is related to authentication/invalid API key."""
+    error_str = str(error).lower()
+    auth_indicators = ["authentication", "unauthorized", "invalid api key", "401"]
+    return any(indicator in error_str for indicator in auth_indicators)
 
 
 async def generate_embeddings(
@@ -15,11 +39,24 @@ async def generate_embeddings(
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """
     Generate embedding vectors for a batch of text chunks.
+
+    Args:
+        texts: List of text strings to generate embeddings for.
+        lecture_id: Unique identifier for the lecture.
+        customer_identifier: Unique identifier for the customer.
+        user_api_key: User's API key for the LLM provider.
+
+    Returns:
+        A tuple containing a list of embedding results (with vector and metadata)
+        and a common metadata dictionary.
+
+    Raises:
+        InvalidAPIKeyError: If the API key is invalid.
     """
     if not texts:
         return [], {}
 
-    # Create client with user's API key
+    posthog_properties = _create_posthog_properties(lecture_id, len(texts))
     client = create_posthog_client(user_api_key, provider="openai")
 
     try:
@@ -28,18 +65,10 @@ async def generate_embeddings(
             input=texts,
             posthog_distinct_id=customer_identifier,
             posthog_trace_id=lecture_id,
-            posthog_properties={
-                "service": "embedding",
-                "lecture_id": lecture_id,
-                "texts_count": len(texts),
-            },
+            posthog_properties=posthog_properties,
         )
 
-        # Batch-level metadata
-        common_metadata: Dict[str, Any] = {
-            "model": response.model,
-            "usage": response.usage.model_dump(),
-        }
+        common_metadata = _extract_metadata(response)
         results: List[Dict[str, Any]] = []
         for data in response.data:
             vector_str = json.dumps(data.embedding)
@@ -47,14 +76,7 @@ async def generate_embeddings(
             results.append({"vector": vector_str, "metadata": json.dumps({})})
         return results, common_metadata
     except Exception as e:
-        # Check if it's an authentication error (invalid API key)
-        error_str = str(e).lower()
-        if (
-            "authentication" in error_str
-            or "unauthorized" in error_str
-            or "invalid api key" in error_str
-            or "401" in error_str
-        ):
+        if _is_authentication_error(e):
             logging.error(f"OpenAI authentication error (invalid API key): {e}")
             raise InvalidAPIKeyError(f"Invalid API key: {str(e)}") from e
         logging.error(
@@ -62,41 +84,3 @@ async def generate_embeddings(
             exc_info=True,
         )
         raise
-
-
-def mock_generate_embeddings(
-    texts: List[str], lecture_id: str
-) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
-    """
-    Mock embedding function for development.
-    Returns a list of fake embedding vectors and metadata.
-    """
-    if not texts:
-        return [], {}
-
-    # Generate mock results and aggregate usage
-    total_prompt = 0
-    results: List[Dict[str, Any]] = []
-    for text in texts:
-        tokens = len(text.split())
-        total_prompt += tokens
-        fake_vector = [random.uniform(-1, 1) for _ in range(1536)]
-        vector_str = json.dumps(fake_vector)
-        # Per-item metadata for DB is an empty object
-        results.append(
-            {
-                "vector": vector_str,
-                "metadata": json.dumps({}),
-            }
-        )
-    # Batch-level metadata
-    common_metadata = {
-        "model": "mock-embedding-model",
-        "usage": {
-            "prompt_tokens": total_prompt,
-            "completion_tokens": 0,
-            "total_tokens": total_prompt,
-        },
-        "mock": True,
-    }
-    return results, common_metadata

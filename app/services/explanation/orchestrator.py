@@ -7,13 +7,11 @@ from app.schemas.explanation import ExplanationPayload, ExplanationResult
 from app.services.explanation.db_utils import (
     verify_lecture_exists,
     explanation_exists,
-    get_slide_context,
     save_explanation,
     increment_progress_and_check_completion,
 )
 from app.services.explanation.llm_utils import (
     generate_explanation,
-    mock_generate_explanation,
 )
 from app.services.explanation.s3_utils import download_slide_image
 from app.services.explanation.pubsub_utils import publish_summary_job
@@ -125,10 +123,7 @@ async def process_explanation_job(payload: ExplanationPayload):
             s3_client, settings.s3_bucket_name, slide_image_path
         )
 
-        # 4. Gather context (previous and next slide text)
-        prev_text, next_text = await get_slide_context(conn, lecture_id, slide_number)
-
-        # 5. Fetch user OpenAI API key from Secret Manager (required)
+        # 4. Fetch user OpenAI API key from Secret Manager (required)
         try:
             user_api_key = get_user_api_key(customer_identifier, provider="openai")
         except SecretNotFoundError:
@@ -151,65 +146,47 @@ async def process_explanation_job(payload: ExplanationPayload):
             )
             raise InvalidAPIKeyError(f"Failed to access API key: {str(e)}")
 
-        # 6. Call LLM
-        if settings.mock_llm_calls:
-            result, metadata = mock_generate_explanation(
+        # 5. Call LLM
+        try:
+            result, metadata = await generate_explanation(
                 image_bytes,
                 slide_number,
                 total_slides,
-                prev_text,
-                next_text,
                 str(lecture_id),
                 str(slide_id),
+                customer_identifier,
+                user_api_key,
+                name,
+                email,
             )
-        else:
+
+        except Exception as e:
+            # For any error (timeout, empty response, network, etc.), create a
+            # fallback explanation so the slide is populated and progress can proceed.
+            logging.error(f"LLM call failed for slide {slide_id}: {e}", exc_info=True)
+
+            # Record the error for auditing
             try:
-                result, metadata = await generate_explanation(
-                    image_bytes,
-                    slide_number,
-                    total_slides,
-                    prev_text,
-                    next_text,
-                    str(lecture_id),
-                    str(slide_id),
-                    customer_identifier,
-                    user_api_key,
-                    name,
-                    email,
-                )
+                await _record_explanation_error(conn, lecture_id, slide_id, e)
+            except Exception:
+                logging.error("Failed to record explanation error to DB", exc_info=True)
 
-            except Exception as e:
-                # For any error (timeout, empty response, network, etc.), create a
-                # fallback explanation so the slide is populated and progress can proceed.
-                logging.error(
-                    f"LLM call failed for slide {slide_id}: {e}", exc_info=True
-                )
-
-                # Record the error for auditing
-                try:
-                    await _record_explanation_error(conn, lecture_id, slide_id, e)
-                except Exception:
-                    logging.error(
-                        "Failed to record explanation error to DB", exc_info=True
-                    )
-
-                # Create minimal fallback for unexpected exceptions
-                result = ExplanationResult(
-                    explanation="Unable to generate explanation due to technical difficulties. Please try again.",
-                    one_liner="Technical error occurred during explanation generation.",
-                    slide_purpose="error",
-                )
-                metadata = {
-                    "model": settings.explanation_model,
-                    "usage": {
-                        "prompt_tokens": 0,
-                        "completion_tokens": 0,
-                        "total_tokens": 0,
-                    },
-                    "response_id": None,
-                    "fallback": True,
-                    "fallback_reason": str(e),
-                }
+            # Create minimal fallback for unexpected exceptions
+            result = ExplanationResult(
+                explanation="Unable to generate explanation due to technical difficulties. Please try again.",
+                slide_purpose="error",
+            )
+            metadata = {
+                "model": settings.explanation_model,
+                "usage": {
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": 0,
+                },
+                "response_id": None,
+                "fallback": True,
+                "fallback_reason": str(e),
+            }
 
         # Log LLM call for explanation
         try:
@@ -238,7 +215,7 @@ async def process_explanation_job(payload: ExplanationPayload):
         except Exception:
             logging.error("Failed to log LLM call for explanation", exc_info=True)
 
-        # 6. Save the structured response
+        # 7. Save the structured response
         await save_explanation(
             conn,
             slide_id,
@@ -248,7 +225,7 @@ async def process_explanation_job(payload: ExplanationPayload):
             metadata,
         )
 
-        # 7. Update progress and trigger summary if it was the last slide
+        # 8. Update progress and trigger summary if it was the last slide
         is_complete = await increment_progress_and_check_completion(conn, lecture_id)
 
         if is_complete:

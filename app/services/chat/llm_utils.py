@@ -34,16 +34,6 @@ async def stream_chat_response(
         model: Model to use for generation
         message_history: Optional list of previous messages (last 5 turns)
     """
-    if settings.mock_llm_calls:
-        # Mock streaming response
-        mock_response = (
-            f"Mock response for query: {query}\n\nContext chunks: {len(context_chunks)}"
-        )
-        if message_history:
-            mock_response += f"\nMessage history: {len(message_history)} messages"
-        for char in mock_response:
-            yield char
-        return
 
     # Build context from RAG chunks
     context_text = "\n\n".join(
@@ -156,11 +146,6 @@ async def generate_chat_title(
     Returns:
         Tuple of (title, usage_metadata)
     """
-    if settings.mock_llm_calls:
-        # Mock title generation
-        combined = f"{user_message[:30]}... {assistant_message[:30]}"
-        mock_title = combined[:50] + "..." if len(combined) > 50 else combined
-        return mock_title, {}
 
     SYSTEM_PROMPT = """Generate a concise title (maximum 80 characters) that summarizes the conversation between the user's question and the assistant's response. The title should capture the main topic or question being discussed. Be clear and descriptive. Do not include quotes, colons, or special formatting. Return only the title text."""
 

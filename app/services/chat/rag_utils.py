@@ -17,12 +17,6 @@ async def generate_query_embedding(
     """
     Create embedding for user query.
     """
-    if settings.mock_llm_calls:
-        # Return mock embedding
-        import random
-
-        return [random.uniform(-1, 1) for _ in range(1536)]
-
     results, _ = await llm_utils.generate_embeddings(
         texts=[text],
         lecture_id="",  # Not needed for query embedding
