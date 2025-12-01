@@ -5,11 +5,11 @@ from io import BytesIO
 from PIL import Image
 from typing import Optional
 
+import litellm
 from pydantic import ValidationError
 
 from app.schemas.image_analysis import ImageAnalysisResult
 from app.utils.config import Settings
-from app.utils.posthog_client import create_posthog_client
 from app.utils.secret_manager import InvalidAPIKeyError
 
 # Constants
@@ -119,11 +119,11 @@ async def analyze_image(
         lecture_id, slide_image_id, len(image_bytes), name, email
     )
 
-    client = create_posthog_client(user_api_key, provider="openai")
+    litellm.success_callback = ["posthog"]
 
     try:
         response = await asyncio.wait_for(
-            client.responses.parse(
+            litellm.aresponses(
                 model=settings.image_analysis_model,
                 instructions=system_prompt,
                 input=[
@@ -139,9 +139,12 @@ async def analyze_image(
                     },
                 ],
                 text_format=ImageAnalysisResult,
-                posthog_distinct_id=customer_identifier,
-                posthog_trace_id=lecture_id,
-                posthog_properties=posthog_properties,
+                api_key=user_api_key,
+                metadata={
+                    "user_id": customer_identifier,
+                    "$ai_trace_id": lecture_id,
+                    **posthog_properties,
+                },
             ),
             timeout=INITIAL_REQUEST_TIMEOUT,
         )
@@ -157,14 +160,17 @@ async def analyze_image(
         )
 
         retry_response = await asyncio.wait_for(
-            client.responses.parse(
+            litellm.aresponses(
                 model=settings.image_analysis_model,
                 input=[{"role": "user", "content": RETRY_PROMPT}],
                 text_format=ImageAnalysisResult,
                 previous_response_id=response.id,
-                posthog_distinct_id=customer_identifier,
-                posthog_trace_id=lecture_id,
-                posthog_properties=retry_properties,
+                api_key=user_api_key,
+                metadata={
+                    "user_id": customer_identifier,
+                    "$ai_trace_id": lecture_id,
+                    **retry_properties,
+                },
             ),
             timeout=RETRY_REQUEST_TIMEOUT,
         )

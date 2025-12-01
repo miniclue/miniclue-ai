@@ -1,9 +1,11 @@
 import logging
 from typing import Optional
 
+import litellm
+
 from app.utils.config import Settings
-from app.utils.posthog_client import create_posthog_client
 from app.utils.secret_manager import InvalidAPIKeyError
+from app.utils.llm_utils import extract_text_from_response
 
 # Constants
 PROMPT_FILE_PATH = "app/services/summary/prompt.md"
@@ -105,19 +107,22 @@ async def generate_summary(
         lecture_id, len(explanations), name, email
     )
 
-    client = create_posthog_client(user_api_key, provider="openai")
+    litellm.success_callback = ["posthog"]
 
     try:
-        response = await client.responses.create(
+        response = await litellm.aresponses(
             model=settings.summary_model,
             instructions=system_prompt,
             input=[{"role": "user", "content": user_content}],
-            posthog_distinct_id=customer_identifier,
-            posthog_trace_id=lecture_id,
-            posthog_properties=posthog_properties,
+            api_key=user_api_key,
+            metadata={
+                "user_id": customer_identifier,
+                "$ai_trace_id": lecture_id,
+                **posthog_properties,
+            },
         )
 
-        summary = response.output_text
+        summary = extract_text_from_response(response)
         metadata = _extract_metadata(response)
 
         if summary:

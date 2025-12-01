@@ -1,10 +1,11 @@
 import asyncio
 import logging
 from typing import AsyncGenerator, List, Dict, Any
+import litellm
 
 from app.utils.config import Settings
-from app.utils.posthog_client import create_posthog_client
 from app.utils.secret_manager import InvalidAPIKeyError
+from app.utils.llm_utils import extract_text_from_response
 
 # Constants
 TITLE_MAX_LENGTH = 80
@@ -118,8 +119,7 @@ async def stream_chat_response(
     # Add the current user query as the final message
     input_messages.append({"role": "user", "content": query})
 
-    # Create client with user's API key
-    client = create_posthog_client(user_api_key, provider="openai")
+    litellm.success_callback = ["posthog"]
 
     posthog_properties = _create_chat_posthog_properties(
         lecture_id, chat_id, len(context_chunks)
@@ -127,14 +127,17 @@ async def stream_chat_response(
 
     stream = None
     try:
-        stream = await client.responses.create(
+        stream = await litellm.aresponses(
             model=model,
             instructions=SYSTEM_PROMPT,
             input=input_messages,
             stream=True,
-            posthog_distinct_id=user_id,
-            posthog_trace_id=chat_id,
-            posthog_properties=posthog_properties,
+            api_key=user_api_key,
+            metadata={
+                "user_id": user_id,
+                "$ai_trace_id": chat_id,
+                **posthog_properties,
+            },
         )
 
         async for event in stream:
@@ -213,21 +216,24 @@ async def generate_chat_title(
 
     posthog_properties = _create_title_posthog_properties(lecture_id, chat_id)
 
-    client = create_posthog_client(user_api_key, provider="openai")
+    litellm.success_callback = ["posthog"]
 
     try:
-        response = await client.responses.create(
+        response = await litellm.aresponses(
             model=TITLE_MODEL,
             instructions=SYSTEM_PROMPT,
             input=input_messages,
             max_tokens=TITLE_MAX_TOKENS,
             temperature=TITLE_TEMPERATURE,
-            posthog_distinct_id=user_id,
-            posthog_trace_id=chat_id,
-            posthog_properties=posthog_properties,
+            api_key=user_api_key,
+            metadata={
+                "user_id": user_id,
+                "$ai_trace_id": chat_id,
+                **posthog_properties,
+            },
         )
 
-        title = response.output_text.strip()
+        title = extract_text_from_response(response).strip()
         # Ensure title doesn't exceed max length
         if len(title) > TITLE_MAX_LENGTH:
             title = title[: TITLE_MAX_LENGTH - 3] + "..."

@@ -2,8 +2,9 @@ import logging
 from typing import List, Dict, Any
 
 from app.utils.config import Settings
-from app.utils.posthog_client import create_posthog_client
 from app.utils.secret_manager import InvalidAPIKeyError
+from app.utils.llm_utils import extract_text_from_response
+import litellm
 
 # Constants
 QUERY_REWRITER_MODEL = "gpt-4.1-nano"
@@ -96,19 +97,22 @@ Instructions:
         lecture_id, chat_id, history_turns
     )
 
-    client = create_posthog_client(user_api_key, provider="openai")
+    litellm.success_callback = ["posthog"]
 
     try:
-        response = await client.responses.create(
+        response = await litellm.aresponses(
             model=QUERY_REWRITER_MODEL,
             instructions=REWRITING_SYSTEM_PROMPT,
             input=input_messages,
-            posthog_distinct_id=user_id,
-            posthog_trace_id=chat_id,
-            posthog_properties=posthog_properties,
+            api_key=user_api_key,
+            metadata={
+                "user_id": user_id,
+                "$ai_trace_id": chat_id,
+                **posthog_properties,
+            },
         )
 
-        rewritten_query = response.output_text.strip()
+        rewritten_query = extract_text_from_response(response).strip()
 
         if not rewritten_query:
             logging.warning(

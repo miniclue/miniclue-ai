@@ -3,11 +3,11 @@ import logging
 import asyncio
 from typing import Optional
 
+import litellm
 from pydantic import ValidationError
 
 from app.schemas.explanation import ExplanationResult
 from app.utils.config import Settings
-from app.utils.posthog_client import create_posthog_client
 from app.utils.secret_manager import InvalidAPIKeyError
 
 
@@ -119,18 +119,21 @@ async def generate_explanation(
         lecture_id, slide_id, slide_number, total_slides, name, email
     )
 
-    client = create_posthog_client(user_api_key, provider="openai")
+    litellm.success_callback = ["posthog"]
 
     try:
         response = await asyncio.wait_for(
-            client.responses.parse(
+            litellm.aresponses(
                 model=settings.explanation_model,
                 input=[{"role": "user", "content": user_message_content}],
                 text_format=ExplanationResult,
                 temperature=LLM_TEMPERATURE,
-                posthog_distinct_id=customer_identifier,
-                posthog_trace_id=lecture_id,
-                posthog_properties=posthog_properties,
+                api_key=user_api_key,
+                metadata={
+                    "user_id": customer_identifier,
+                    "$ai_trace_id": lecture_id,
+                    **posthog_properties,
+                },
             ),
             timeout=INITIAL_REQUEST_TIMEOUT,
         )
@@ -146,14 +149,17 @@ async def generate_explanation(
         )
 
         retry_response = await asyncio.wait_for(
-            client.responses.parse(
+            litellm.aresponses(
                 model=settings.explanation_model,
                 input=[{"role": "user", "content": RETRY_PROMPT}],
                 text_format=ExplanationResult,
                 previous_response_id=response.id,
-                posthog_distinct_id=customer_identifier,
-                posthog_trace_id=lecture_id,
-                posthog_properties=retry_properties,
+                api_key=user_api_key,
+                metadata={
+                    "user_id": customer_identifier,
+                    "$ai_trace_id": lecture_id,
+                    **retry_properties,
+                },
             ),
             timeout=RETRY_REQUEST_TIMEOUT,
         )

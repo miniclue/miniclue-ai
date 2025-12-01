@@ -1,9 +1,10 @@
 import json
 import logging
 from typing import List, Dict, Any, Tuple
+import litellm
+
 
 from app.utils.config import Settings
-from app.utils.posthog_client import create_posthog_client
 from app.utils.secret_manager import InvalidAPIKeyError
 
 # Initialize settings
@@ -21,9 +22,23 @@ def _create_posthog_properties(lecture_id: str, texts_count: int) -> dict:
 
 def _extract_metadata(response) -> Dict[str, Any]:
     """Extracts metadata from embeddings response."""
+    # Handle both dict and object responses from LiteLLM
+    if isinstance(response, dict):
+        model = response.get("model", "")
+        usage = response.get("usage", {})
+        if hasattr(usage, "model_dump"):
+            usage = usage.model_dump()
+    else:
+        model = getattr(response, "model", "")
+        usage_obj = getattr(response, "usage", None)
+        usage = (
+            usage_obj.model_dump()
+            if usage_obj and hasattr(usage_obj, "model_dump")
+            else {}
+        )
     return {
-        "model": response.model,
-        "usage": response.usage.model_dump(),
+        "model": model,
+        "usage": usage,
     }
 
 
@@ -35,15 +50,15 @@ def _is_authentication_error(error: Exception) -> bool:
 
 
 async def generate_embeddings(
-    texts: List[str], lecture_id: str, customer_identifier: str, user_api_key: str
+    texts: List[str], lecture_or_chat_id: str, user_id: str, user_api_key: str
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """
     Generate embedding vectors for a batch of text chunks.
 
     Args:
         texts: List of text strings to generate embeddings for.
-        lecture_id: Unique identifier for the lecture.
-        customer_identifier: Unique identifier for the customer.
+        lecture_or_chat_id: Unique identifier for the lecture or chat.
+        user_id: Unique identifier for the user.
         user_api_key: User's API key for the LLM provider.
 
     Returns:
@@ -56,22 +71,37 @@ async def generate_embeddings(
     if not texts:
         return [], {}
 
-    posthog_properties = _create_posthog_properties(lecture_id, len(texts))
-    client = create_posthog_client(user_api_key, provider="openai")
+    posthog_properties = _create_posthog_properties(lecture_or_chat_id, len(texts))
+
+    litellm.success_callback = ["posthog"]
 
     try:
-        response = await client.embeddings.create(
+        response = await litellm.aembedding(
             model=settings.embedding_model,
             input=texts,
-            posthog_distinct_id=customer_identifier,
-            posthog_trace_id=lecture_id,
-            posthog_properties=posthog_properties,
+            api_key=user_api_key,
+            metadata={
+                "user_id": user_id,
+                "$ai_trace_id": lecture_or_chat_id,
+                **posthog_properties,
+            },
         )
 
         common_metadata = _extract_metadata(response)
         results: List[Dict[str, Any]] = []
-        for data in response.data:
-            vector_str = json.dumps(data.embedding)
+        # Handle both dict and object responses from LiteLLM
+        if isinstance(response, dict):
+            data_list = response.get("data", [])
+        else:
+            data_list = getattr(response, "data", [])
+
+        for data_item in data_list:
+            # Handle both dict and object access patterns
+            if isinstance(data_item, dict):
+                embedding = data_item.get("embedding", [])
+            else:
+                embedding = getattr(data_item, "embedding", [])
+            vector_str = json.dumps(embedding)
             # Store an empty object for per-item metadata to avoid redundancy
             results.append({"vector": vector_str, "metadata": json.dumps({})})
         return results, common_metadata

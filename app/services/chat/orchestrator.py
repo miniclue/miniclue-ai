@@ -98,6 +98,7 @@ async def process_chat_request(
             query_text=rewritten_query,
             user_api_key=user_api_key,
             user_id=user_id,
+            chat_id=str(chat_id),
             top_k=settings.rag_top_k,
         )
 
