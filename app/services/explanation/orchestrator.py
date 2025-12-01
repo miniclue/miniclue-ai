@@ -16,7 +16,6 @@ from app.services.explanation.llm_utils import (
 from app.services.explanation.s3_utils import download_slide_image
 from app.services.explanation.pubsub_utils import publish_summary_job
 from app.utils.config import Settings
-from app.utils.llm_db_utils import log_llm_call, compute_cost
 from app.utils.sanitize import sanitize_json, sanitize_text
 from app.utils.secret_manager import (
     get_user_api_key,
@@ -187,33 +186,6 @@ async def process_explanation_job(payload: ExplanationPayload):
                 "fallback": True,
                 "fallback_reason": str(e),
             }
-
-        # Log LLM call for explanation
-        try:
-            usage = metadata.get("usage") or {}
-            # Handle both Chat Completions API (prompt_tokens/completion_tokens) and Responses API (input_tokens/output_tokens)
-            prompt_tokens = usage.get("prompt_tokens", usage.get("input_tokens", 0))
-            completion_tokens = usage.get(
-                "completion_tokens", usage.get("output_tokens", 0)
-            )
-            total_tokens = usage.get("total_tokens", prompt_tokens + completion_tokens)
-            cost = compute_cost(
-                settings.explanation_model, prompt_tokens, completion_tokens
-            )
-            await log_llm_call(
-                conn,
-                lecture_id,
-                slide_id,
-                "explanation",
-                settings.explanation_model,
-                prompt_tokens,
-                completion_tokens,
-                total_tokens,
-                cost,
-                metadata,
-            )
-        except Exception:
-            logging.error("Failed to log LLM call for explanation", exc_info=True)
 
         # 7. Save the structured response
         await save_explanation(

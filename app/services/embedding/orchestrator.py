@@ -8,7 +8,6 @@ from app.services.embedding import db_utils
 from app.schemas.embedding import EmbeddingPayload
 from app.services.embedding import llm_utils
 from app.utils.config import Settings
-from app.utils.llm_db_utils import log_llm_call, compute_cost
 from app.utils.secret_manager import (
     get_user_api_key,
     SecretNotFoundError,
@@ -94,31 +93,6 @@ async def process_embedding_job(payload: EmbeddingPayload):
             payload.customer_identifier,
             user_api_key,
         )
-        # Log LLM call for embedding using the returned metadata
-        try:
-            usage = metadata.get("usage", {}) if metadata else {}
-            # Handle both Chat Completions API (prompt_tokens/completion_tokens) and Responses API (input_tokens/output_tokens)
-            prompt_tokens = usage.get("prompt_tokens", usage.get("input_tokens", 0))
-            completion_tokens = usage.get(
-                "completion_tokens", usage.get("output_tokens", 0)
-            )
-            total_tokens = usage.get("total_tokens", prompt_tokens + completion_tokens)
-            cost = compute_cost(
-                settings.embedding_model, prompt_tokens, completion_tokens
-            )
-            await log_llm_call(
-                conn,
-                lecture_id,
-                None,
-                "embedding",
-                settings.embedding_model,
-                prompt_tokens,
-                completion_tokens,
-                total_tokens,
-                cost,
-            )
-        except Exception:
-            logging.error("Failed to log LLM call for embedding", exc_info=True)
 
         # 5. Prepare data for batch database insertion, ensuring result count matches inputs
         if len(embedding_results) != len(chunks):

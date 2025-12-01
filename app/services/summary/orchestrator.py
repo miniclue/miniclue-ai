@@ -3,7 +3,6 @@ import asyncpg
 from app.schemas.summary import SummaryPayload
 from app.services.summary import db_utils, llm_utils
 from app.utils.config import Settings
-from app.utils.llm_db_utils import log_llm_call, compute_cost
 from app.utils.secret_manager import (
     get_user_api_key,
     SecretNotFoundError,
@@ -73,33 +72,6 @@ async def process_summary_job(payload: SummaryPayload):
             payload.name,
             payload.email,
         )
-        # Log LLM call for summary
-        try:
-            usage = metadata.get("usage") or {}
-            # Handle both Chat Completions API (prompt_tokens/completion_tokens) and Responses API (input_tokens/output_tokens)
-            prompt_tokens = usage.get("prompt_tokens", usage.get("input_tokens", 0))
-            completion_tokens = usage.get(
-                "completion_tokens", usage.get("output_tokens", 0)
-            )
-            total_tokens = usage.get("total_tokens", prompt_tokens + completion_tokens)
-
-            cost = compute_cost(
-                settings.summary_model, prompt_tokens, completion_tokens
-            )
-            await log_llm_call(
-                conn,
-                lecture_id,
-                None,
-                "summary",
-                settings.summary_model,
-                prompt_tokens,
-                completion_tokens,
-                total_tokens,
-                cost,
-                metadata,
-            )
-        except Exception:
-            logging.error("Failed to log LLM call for summary", exc_info=True)
 
         # 6. Atomically save summary, and check for rendezvous
         embeddings_are_complete = False
