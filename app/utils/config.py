@@ -25,6 +25,12 @@ class Settings(BaseSettings):
     openai_api_base_url: str = "https://api.openai.com/v1"
     # Gemini
     gemini_api_base_url: str = "https://generativelanguage.googleapis.com/v1beta"
+    # Anthropic
+    anthropic_api_base_url: str = "https://api.anthropic.com/v1"
+    # Grok
+    xai_api_base_url: str = "https://api.x.ai/v1"
+    # DeepSeek
+    deepseek_api_base_url: str = "https://api.deepseek.com"
     # PostHog Configuration
     posthog_api_key: str = ""
     posthog_api_url: str = "https://us.i.posthog.com"

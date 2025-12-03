@@ -6,6 +6,7 @@ from posthog import Posthog
 from posthog.ai.openai import AsyncOpenAI
 
 from app.utils.config import Settings
+from app.utils.model_provider_mapping import Provider
 
 # Initialize settings
 settings = Settings()
@@ -37,21 +38,45 @@ def get_posthog_client() -> Optional[Posthog]:
     return _posthog_client
 
 
-def get_openai_client(api_key: str) -> AsyncOpenAI:
+def get_base_url_for_provider(provider: Provider) -> str:
+    """
+    Get the base URL for a given provider.
+
+    Args:
+        provider: The provider name
+
+    Returns:
+        The base URL for the provider
+    """
+    provider_base_urls: dict[Provider, str] = {
+        "openai": settings.openai_api_base_url,
+        "gemini": settings.gemini_api_base_url,
+        "anthropic": settings.anthropic_api_base_url,
+        "xai": settings.xai_api_base_url,
+        "deepseek": settings.deepseek_api_base_url,
+    }
+    return provider_base_urls.get(provider, settings.openai_api_base_url)
+
+
+def get_openai_client(api_key: str, base_url: str | None = None) -> AsyncOpenAI:
     """
     Get an OpenAI client wrapped with Posthog for automatic LLM analytics.
 
     Args:
-        api_key: OpenAI API key
+        api_key: API key for the provider
+        base_url: Optional base URL. If not provided, uses OpenAI base URL from settings.
 
     Returns:
         AsyncOpenAI client with Posthog integration
     """
     posthog_client = get_posthog_client()
 
+    if base_url is None:
+        base_url = settings.openai_api_base_url
+
     return AsyncOpenAI(
         api_key=api_key,
-        base_url=settings.openai_api_base_url,
+        base_url=base_url,
         posthog_client=posthog_client,  # Optional: if None, Posthog will use default client
     )
 

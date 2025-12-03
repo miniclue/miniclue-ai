@@ -12,6 +12,8 @@ from app.utils.secret_manager import (
     SecretNotFoundError,
     InvalidAPIKeyError,
 )
+from app.utils.model_provider_mapping import get_provider_for_model
+from app.utils.posthog_client import get_base_url_for_provider
 
 settings = Settings()
 
@@ -52,17 +54,39 @@ async def process_chat_request(
         if not query_text:
             raise ValueError("Message must contain at least one text part")
 
-        # Fetch user OpenAI API key from Secret Manager (required)
+        # Determine provider from model ID for streaming response
+        provider = get_provider_for_model(model)
+        if provider is None:
+            raise ValueError(f"Unknown model: {model}")
+
+        # Fetch OpenAI API key for query rewriting and RAG (always use OpenAI)
         try:
-            user_api_key = get_user_api_key(str(user_id), provider="openai")
+            openai_api_key = get_user_api_key(str(user_id), provider="openai")
         except SecretNotFoundError:
-            logging.error(f"API key not found for user {user_id}")
+            logging.error(f"OpenAI API key not found for user {user_id}")
             raise InvalidAPIKeyError(
-                "User API key not found. Please configure your API key in settings."
+                "User OpenAI API key not found. Please configure your API key in settings."
             )
         except Exception as e:
-            logging.error(f"Failed to fetch user API key for {user_id}: {e}")
+            logging.error(f"Failed to fetch OpenAI API key for {user_id}: {e}")
+            raise InvalidAPIKeyError(f"Failed to access OpenAI API key: {str(e)}")
+
+        # Fetch user API key for the determined provider from Secret Manager (for streaming response)
+        try:
+            user_api_key = get_user_api_key(str(user_id), provider=provider)
+        except SecretNotFoundError:
+            logging.error(f"API key not found for user {user_id}, provider {provider}")
+            raise InvalidAPIKeyError(
+                f"User API key not found for {provider}. Please configure your API key in settings."
+            )
+        except Exception as e:
+            logging.error(
+                f"Failed to fetch user API key for {user_id}, provider {provider}: {e}"
+            )
             raise InvalidAPIKeyError(f"Failed to access API key: {str(e)}")
+
+        # Get base URL for the provider (only for streaming response)
+        base_url = get_base_url_for_provider(provider)
 
         # Fetch message history once (up to 5 turns = 10 messages) for both query rewriting and final prompt
         # Fetch 11 messages to account for excluding the current user message, ensuring we have up to 5 turns after exclusion
@@ -76,13 +100,14 @@ async def process_chat_request(
             message_history = message_history[:-1]
 
         # Rewrite query using available history (up to last 3 turns) only if history exists
+        # Use OpenAI API key for query rewriting
         rewritten_query = query_text
         if message_history:
             try:
                 rewritten_query = await query_rewriter.rewrite_query(
                     current_question=query_text,
                     message_history=message_history,
-                    user_api_key=user_api_key,
+                    user_api_key=openai_api_key,
                     user_id=str(user_id),
                     lecture_id=str(lecture_id),
                     chat_id=str(chat_id),
@@ -92,11 +117,12 @@ async def process_chat_request(
                 # Continue with original query if rewriting fails
 
         # Retrieve relevant chunks via RAG using rewritten query
+        # Use OpenAI API key for RAG embeddings
         context_chunks = await rag_utils.retrieve_relevant_chunks(
             conn=conn,
             lecture_id=lecture_id,
             query_text=rewritten_query,
-            user_api_key=user_api_key,
+            user_api_key=openai_api_key,
             user_id=user_id,
             chat_id=str(chat_id),
             top_k=settings.rag_top_k,
@@ -113,6 +139,7 @@ async def process_chat_request(
                 user_id=str(user_id),
                 user_api_key=user_api_key,
                 model=model,
+                base_url=base_url,
             ):
                 yield chunk
         except asyncio.CancelledError:
@@ -193,20 +220,23 @@ async def process_title_generation(
         if not assistant_message_text:
             raise ValueError("Assistant message must contain at least one text part")
 
-        # Fetch user OpenAI API key from Secret Manager (required)
+        # For title generation, use OpenAI provider (default)
+        provider = "openai"
         try:
-            user_api_key = get_user_api_key(str(user_id), provider="openai")
+            user_api_key = get_user_api_key(str(user_id), provider=provider)
         except SecretNotFoundError:
-            logging.error(f"API key not found for user {user_id}")
+            logging.error(f"API key not found for user {user_id}, provider {provider}")
             raise InvalidAPIKeyError(
-                "User API key not found. Please configure your API key in settings."
+                f"User API key not found for {provider}. Please configure your API key in settings."
             )
         except Exception as e:
-            logging.error(f"Failed to fetch user API key for {user_id}: {e}")
+            logging.error(
+                f"Failed to fetch user API key for {user_id}, provider {provider}: {e}"
+            )
             raise InvalidAPIKeyError(f"Failed to access API key: {str(e)}")
 
-        # Generate title via LLM
-        title, usage_metadata = await llm_utils.generate_chat_title(
+        # Generate title via LLM (always use OpenAI, no custom base_url)
+        title, _ = await llm_utils.generate_chat_title(
             user_message=user_message_text,
             assistant_message=assistant_message_text,
             user_api_key=user_api_key,

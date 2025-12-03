@@ -77,6 +77,7 @@ async def stream_chat_response(
     user_api_key: str,
     model: str,
     message_history: List[Dict[str, Any]] | None = None,
+    base_url: str | None = None,
 ) -> AsyncGenerator[str, None]:
     """
     Stream chat response using OpenAI Chat Completions API streaming.
@@ -131,7 +132,7 @@ async def stream_chat_response(
         lecture_id, chat_id, len(context_chunks)
     )
 
-    client = get_openai_client(user_api_key)
+    client = get_openai_client(user_api_key, base_url=base_url)
 
     try:
         stream = await client.chat.completions.create(
@@ -211,6 +212,7 @@ async def generate_chat_title(
 
     posthog_properties = _create_title_posthog_properties(lecture_id, chat_id)
 
+    # Always use OpenAI default base_url for title generation
     client = get_openai_client(user_api_key)
 
     try:
