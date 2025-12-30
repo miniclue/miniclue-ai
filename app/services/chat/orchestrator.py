@@ -165,7 +165,7 @@ async def process_chat_request(
                 f"Lecture {lecture_id} not found or user {user_id} does not own it"
             )
 
-        # 2. Parse message parts and resolve references
+        # 2. Parse message parts, resolve references and get resources
         query_text, resolved_references = await _parse_message_parts(
             conn, lecture_id, message
         )

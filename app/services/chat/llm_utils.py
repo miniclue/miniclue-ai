@@ -8,6 +8,7 @@ from app.utils.llm_utils import extract_text_from_response
 from app.utils.posthog_client import get_openai_client
 from app.utils.s3_utils import get_s3_client, download_image_as_base64
 
+
 # Constants
 TITLE_MAX_LENGTH = 80
 TITLE_MODEL = "gpt-4.1-nano"
@@ -98,28 +99,52 @@ async def stream_chat_response(
         message_history: Optional list of previous messages (last 5 turns)
     """
 
+    SYSTEM_PROMPT = """You are an expert AI University Tutor specializing in breaking down complex technical concepts into clear, digestible insights.
+
+### YOUR GOAL
+Explain the user's query based on the provided Lecture Slides. Your explanations must be simple, concise and effective.
+
+### RESPONSE GUIDELINES
+1.  **Top-Down Teaching:** Always start with a high-level summary of the "What" and "Why" before diving into the technical "How."
+2.  **Adaptive Explanations (Use tools only when they add value):**
+    - **Analogies:** Use them *only* if the concept is abstract or complex. If used, keep them brief and relevant.
+    - **Visuals (Mermaid.js):** Use *only* if explaining a process, data flow, or logical hierarchy.
+    - **Tables:** Use *only* for comparisons or distinct code breakdowns.
+    - **Concrete Examples:** Mandatory for math, algorithms, or code logic.
+3.  **Natural Flow:** Do not use generic headers like "The Analogy" or "The Big Picture" unless necessary. Use descriptive headers that match the content (e.g., "Analogy: The Hotel System").
+4.  **Tone:** Smart 15-year-old. Concise and direct.
+
+### RULES
+- **Context is King:** Base your answer strictly on the `<lecture_context>`. Use general knowledge only to fill gaps or provide analogies.
+- **Format for Scannability:** Always use Markdown. Structure your response with clear **Headings**, **Numbered Lists**, **Bullet Points**, and **Tables**. Avoid long paragraphs.
+- **Be Concise:** Get straight to the point.
+- **Latex:** Use LaTeX for all math formulas."""
+
+    messages = [{"role": "developer", "content": SYSTEM_PROMPT}]
+
     # Build context from RAG chunks
-    context_text = "\n\n".join(
-        [
-            f"[Slide {chunk['slide_number']}, Chunk {chunk['chunk_index']}]\n{chunk['text']}"
-            for chunk in context_chunks
-        ]
+    # 1. Formatting context chunks with XML tags for better boundary detection
+    context_text = ""
+    for chunk in context_chunks:
+        context_text += f"""
+    <slide id="{chunk['slide_number']}" chunk="{chunk['chunk_index']}">
+    {chunk['text']}
+    </slide>
+    """
+
+    # 2. Add the user message with explicit instruction on how to treat the context
+    messages.append(
+        {
+            "role": "user",
+            "content": f"""I am looking at the following lecture content. Use this as your primary source of truth:
+
+    <lecture_context>
+    {context_text}
+    </lecture_context>
+
+    Based on the context above (and any images provided), please answer my upcoming question.""",
+        }
     )
-
-    # Build system prompt
-    SYSTEM_PROMPT = f"""You are a helpful AI assistant explaining lecture materials.
-1. **Source:** Always use the provided lecture context (RAG chunks) first. If the context is insufficient, use your general knowledge.
-2. **Format:** Respond in **Markdown**. Use **bullet points** or numbered lists when explaining multiple points or steps for easy reading. Use **bold text** for key terms.
-3. **Tone:** Be concise, clear, and academic.
-4. **Context:** The following content is the lecture material you must use.
-
---- LECTURE CONTEXT ---
-{context_text}
---- END LECTURE CONTEXT ---
-"""
-
-    # Build messages array for chat.completions API
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
 
     # Add message history directly to the list
     if message_history:
@@ -154,7 +179,7 @@ async def stream_chat_response(
                                             },
                                             {
                                                 "type": "text",
-                                                "text": f"Reference: Slide {slide_num}",
+                                                "text": f"Context: This is the visual slide (Slide {slide_num}) corresponding to the text provided earlier. Analyze the diagrams/code structure visually.",
                                             },
                                         ],
                                     }
