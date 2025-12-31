@@ -30,9 +30,7 @@ async def lifespan(app: FastAPI):
     # Startup
     logging.info(f"🚀 MiniClue AI Service starting on {settings.host}:{settings.port}")
     logging.info(f"Environment: {settings.app_env}")
-    logging.info(
-        "Routers registered: /ingestion, /embedding, /image-analysis, /chat (explanation and summary deprecated)"
-    )
+    logging.info("Routers registered: /ingestion, /embedding, /image-analysis, /chat")
     yield
     # Shutdown (if needed in the future)
     pass
@@ -90,12 +88,6 @@ async def generic_exception_handler(request: Request, exc: Exception):
 # Include routers for Pub/Sub push subscriptions
 app.include_router(ingestion.router)
 app.include_router(embedding.router)
-
-# DEPRECATED: Explanation and summary routers are no longer active
-# These features have been removed from the lecture data flow (Steps 5 and 6)
-# Uncomment below to reactivate these features
-# app.include_router(explanation.router)
-# app.include_router(summary.router)
 
 app.include_router(image_analysis.router)
 app.include_router(chat.router)

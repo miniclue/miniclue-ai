@@ -1,13 +1,15 @@
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict, Any, TYPE_CHECKING
 
 from app.utils.config import Settings
 from app.utils.secret_manager import InvalidAPIKeyError
 from app.utils.llm_utils import extract_text_from_response
-from app.utils.posthog_client import get_openai_client
+from app.utils.model_provider_mapping import get_provider_for_model
+
+if TYPE_CHECKING:
+    from posthog.ai.openai import AsyncOpenAI
 
 # Constants
-QUERY_REWRITER_MODEL = "gpt-4.1-nano"
 HISTORY_TURNS_COUNT = 3
 MESSAGES_PER_TURN = 2
 
@@ -39,7 +41,7 @@ def _create_query_rewriter_posthog_properties(
 async def rewrite_query(
     current_question: str,
     message_history: List[Dict[str, Any]],
-    user_api_key: str,
+    client: "AsyncOpenAI",
     user_id: str,
     lecture_id: str,
     chat_id: str,
@@ -51,7 +53,7 @@ async def rewrite_query(
     Args:
         current_question: The user's current question
         message_history: List of message dicts with 'role' and 'text' keys (chronological order)
-        user_api_key: User's OpenAI API key
+        client: PostHog-wrapped OpenAI client
         user_id: User ID for PostHog tracking
         lecture_id: Lecture ID for PostHog tracking
         chat_id: Chat ID for PostHog trace tracking
@@ -97,18 +99,19 @@ Instructions:
         lecture_id, chat_id, history_turns
     )
 
-    client = get_openai_client(user_api_key)
-
-    messages = [{"role": "system", "content": REWRITING_SYSTEM_PROMPT}] + input_messages
+    messages = [
+        {"role": "developer", "content": REWRITING_SYSTEM_PROMPT}
+    ] + input_messages
 
     try:
         response = await client.chat.completions.create(
-            model=QUERY_REWRITER_MODEL,
+            model=settings.query_rewriter_model,
             messages=messages,
             posthog_distinct_id=user_id,
             posthog_trace_id=chat_id,
             posthog_properties={
                 "$ai_span_name": "chat_query_rewriter",
+                "$ai_provider": get_provider_for_model(settings.query_rewriter_model),
                 **posthog_properties,
             },
         )

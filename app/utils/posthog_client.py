@@ -5,13 +5,13 @@ from __future__ import annotations
 import logging
 from typing import Optional, TYPE_CHECKING
 
-
 from app.utils.config import Settings
 from app.utils.model_provider_mapping import Provider
 
 if TYPE_CHECKING:
     from posthog import Posthog
     from posthog.ai.openai import AsyncOpenAI
+    from google.genai import Client
 
 # Initialize settings
 settings = Settings()
@@ -88,6 +88,18 @@ def get_openai_client(api_key: str, base_url: str | None = None) -> AsyncOpenAI:
         base_url=base_url,
         posthog_client=posthog_client,  # Optional: if None, Posthog will use default client
     )
+
+
+def get_gemini_client(api_key: str) -> "Client":
+    """
+    Get a Gemini client.
+
+    Args:
+        api_key: API key for the provider
+    """
+    from google.genai import Client
+
+    return Client(api_key=api_key)
 
 
 def shutdown_posthog() -> None:

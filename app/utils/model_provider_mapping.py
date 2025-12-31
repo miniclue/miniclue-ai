@@ -26,6 +26,7 @@ MODEL_TO_PROVIDER_MAP: dict[str, Provider] = {
     "gemini-2.5-pro": "gemini",
     "gemini-2.5-flash": "gemini",
     "gemini-2.5-flash-lite": "gemini",
+    "gemini-embedding-001": "gemini",
     # Anthropic models
     "claude-sonnet-4-5": "anthropic",
     "claude-haiku-4-5": "anthropic",

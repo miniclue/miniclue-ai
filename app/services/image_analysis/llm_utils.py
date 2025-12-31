@@ -3,32 +3,31 @@ import asyncio
 import logging
 import time
 from io import BytesIO
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 from pydantic import ValidationError
 
 from app.schemas.image_analysis import ImageAnalysisResult
 from app.utils.config import Settings
 from app.utils.secret_manager import InvalidAPIKeyError
-from app.utils.posthog_client import get_openai_client, get_posthog_client
+from app.utils.model_provider_mapping import get_provider_for_model
+from app.utils.llm_utils import (
+    extract_metadata,
+    is_authentication_error,
+)
+from app.utils.posthog_client import (
+    get_posthog_client,
+)
+
+if TYPE_CHECKING:
+    from posthog.ai.openai import AsyncOpenAI
 
 # Constants
 INITIAL_REQUEST_TIMEOUT = 60.0
 RETRY_REQUEST_TIMEOUT = 30.0
 MAX_RETRIES = 2
-PROMPT_FILE_PATH = "app/services/image_analysis/prompt.md"
 
 # Initialize settings
 settings = Settings()
-
-
-def _load_system_prompt() -> str:
-    """Loads the system prompt from the prompt file."""
-    try:
-        with open(PROMPT_FILE_PATH, "r", encoding="utf-8") as f:
-            return f.read()
-    except FileNotFoundError:
-        logging.error("Image analysis prompt file not found.")
-        raise
 
 
 def _create_posthog_properties(
@@ -52,26 +51,9 @@ def _create_posthog_properties(
     return properties
 
 
-def _extract_metadata(response) -> dict:
-    """Extracts metadata from LLM response."""
-    usage = getattr(response, "usage", None)
-    return {
-        "model": getattr(response, "model", ""),
-        "usage": usage.model_dump() if usage and hasattr(usage, "model_dump") else None,
-        "response_id": getattr(response, "id", ""),
-    }
-
-
 def _create_fallback_response() -> ImageAnalysisResult:
     """Creates a fallback response when LLM fails to produce structured output."""
     return ImageAnalysisResult(type="content", ocr_text="", alt_text="")
-
-
-def _is_authentication_error(error: Exception) -> bool:
-    """Checks if the error is related to authentication/invalid API key."""
-    error_str = str(error).lower()
-    auth_indicators = ["authentication", "unauthorized", "invalid api key", "401"]
-    return any(indicator in error_str for indicator in auth_indicators)
 
 
 def _capture_posthog_event(
@@ -109,7 +91,7 @@ def _capture_posthog_event(
                 "$ai_trace_id": lecture_id,
                 "$ai_span_name": "lecture_image_analysis",
                 "$ai_model": getattr(response, "model", settings.image_analysis_model),
-                "$ai_provider": "openai",
+                "$ai_provider": get_provider_for_model(settings.image_analysis_model),
                 "$ai_input": messages,
                 "$ai_input_tokens": input_tokens,
                 "$ai_output_choices": output_choices,
@@ -127,19 +109,19 @@ async def analyze_image(
     lecture_id: str,
     slide_image_id: str,
     customer_identifier: str,
-    user_api_key: str,
+    client: "AsyncOpenAI",
     name: Optional[str] = None,
     email: Optional[str] = None,
 ) -> tuple[ImageAnalysisResult, dict]:
     """
-    Analyzes an image using OpenAI Chat Completions API with JSON structured outputs.
+    Analyzes an image using an LLM provider with JSON structured outputs.
 
     Args:
         image_bytes: The byte content of the image to analyze.
         lecture_id: Unique identifier for the lecture.
         slide_image_id: Unique identifier for the slide image.
         customer_identifier: Unique identifier for the customer.
-        user_api_key: User's API key for the LLM provider.
+        client: PostHog-wrapped OpenAI client.
         name: Optional customer name for tracking.
         email: Optional customer email for tracking.
 
@@ -151,7 +133,6 @@ async def analyze_image(
         InvalidAPIKeyError: If the API key is invalid.
         FileNotFoundError: If the prompt file is not found.
     """
-    system_prompt = _load_system_prompt()
 
     from PIL import Image
 
@@ -165,10 +146,24 @@ async def analyze_image(
         lecture_id, slide_image_id, len(image_bytes), name, email
     )
 
-    client = get_openai_client(user_api_key)
-
     messages = [
-        {"role": "system", "content": system_prompt},
+        {
+            "role": "developer",
+            "content": """You are an image analysis API. Your sole function is to analyze the provided image and return a single, raw JSON object.
+
+You MUST strictly adhere to the following JSON structure:
+{
+"type": "content" | "decorative",
+"ocr_text": "string",
+"alt_text": "string"
+}
+
+- "type": Classify the image. Use "content" for meaningful information (diagrams, charts, text). Use "decorative" for aesthetics (backgrounds, stock photos).
+- "ocr_text": Extract all visible text. Return an empty string if there is no text.
+- "alt_text": Write a concise, descriptive alt text for accessibility, explaining the image's content and purpose.
+
+Your response MUST NOT include any explanations, introductory text, or markdown formatting like ```json. It must be ONLY the raw JSON object.""",
+        },
         {
             "role": "user",
             "content": [
@@ -192,7 +187,7 @@ async def analyze_image(
             latency = time.time() - start_time
 
             result = response.choices[0].message.parsed
-            metadata = _extract_metadata(response)
+            metadata = extract_metadata(response)
             _capture_posthog_event(
                 customer_identifier,
                 lecture_id,
@@ -216,7 +211,7 @@ async def analyze_image(
                 "Image analysis response did not match the expected format."
             ) from e
         except Exception as e:
-            if _is_authentication_error(e):
+            if is_authentication_error(e):
                 logging.error(f"OpenAI authentication error (invalid API key): {e}")
                 raise InvalidAPIKeyError(f"Invalid API key: {str(e)}") from e
             logging.error(

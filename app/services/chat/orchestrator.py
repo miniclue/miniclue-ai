@@ -1,19 +1,18 @@
 import asyncio
 import logging
 from uuid import UUID
-from typing import AsyncGenerator
+from typing import AsyncGenerator, TYPE_CHECKING
 
 import asyncpg
 
+if TYPE_CHECKING:
+    from posthog.ai.openai import AsyncOpenAI
+    from google.genai import Client
+
 from app.services.chat import db_utils, rag_utils, llm_utils, query_rewriter
 from app.utils.config import Settings
-from app.utils.secret_manager import (
-    get_user_api_key,
-    SecretNotFoundError,
-    InvalidAPIKeyError,
-)
-from app.utils.model_provider_mapping import get_provider_for_model
-from app.utils.posthog_client import get_base_url_for_provider
+from app.utils.llm_utils import get_llm_context
+
 
 settings = Settings()
 
@@ -81,46 +80,26 @@ async def _parse_message_parts(
     return query_text.strip(), resolved_references
 
 
-async def _get_api_context(user_id: UUID, model: str) -> tuple[str, str, str, str]:
+async def _get_api_context(
+    user_id: UUID, model: str
+) -> tuple["AsyncOpenAI", "Client", "AsyncOpenAI"]:
     """
-    Determines provider and fetches necessary API keys.
-    Returns (provider, openai_api_key, user_api_key, base_url).
+    Determines provider and fetches necessary API clients.
+    Returns (chat_client, chat_provider, embedding_client, rewriter_client).
     """
-    provider = get_provider_for_model(model)
-    if provider is None:
-        raise ValueError(f"Unknown model: {model}")
 
-    # Fetch OpenAI API key (for RAG/rewriting)
-    try:
-        openai_api_key = get_user_api_key(str(user_id), provider="openai")
-    except SecretNotFoundError:
-        logging.error(f"OpenAI API key not found for user {user_id}")
-        raise InvalidAPIKeyError(
-            "User OpenAI API key not found. Please configure your API key in settings."
-        )
-    except Exception as e:
-        logging.error(f"Failed to fetch OpenAI API key for {user_id}: {e}")
-        raise InvalidAPIKeyError(f"Failed to access OpenAI API key: {str(e)}")
+    # 1. Fetch Embedding API client
+    embedding_client, _ = await get_llm_context(
+        user_id, settings.embedding_model, is_embedding=True
+    )
 
-    # Fetch provider-specific API key (for streaming)
-    if provider == "openai":
-        user_api_key = openai_api_key
-    else:
-        try:
-            user_api_key = get_user_api_key(str(user_id), provider=provider)
-        except SecretNotFoundError:
-            logging.error(f"API key not found for user {user_id}, provider {provider}")
-            raise InvalidAPIKeyError(
-                f"User API key not found for {provider}. Please configure your API key in settings."
-            )
-        except Exception as e:
-            logging.error(
-                f"Failed to fetch user API key for {user_id}, provider {provider}: {e}"
-            )
-            raise InvalidAPIKeyError(f"Failed to access API key: {str(e)}")
+    # 2. Fetch Rewriter API client
+    rewriter_client, _ = await get_llm_context(user_id, settings.query_rewriter_model)
 
-    base_url = get_base_url_for_provider(provider)
-    return provider, openai_api_key, user_api_key, base_url
+    # 3. Fetch Provider-specific API client (for streaming)
+    chat_client, _ = await get_llm_context(user_id, model)
+
+    return chat_client, embedding_client, rewriter_client
 
 
 async def _get_processed_history(
@@ -172,10 +151,12 @@ async def process_chat_request(
         if not query_text:
             raise ValueError("Message must contain at least one text part")
 
-        # 3. Get API context (provider, keys, base_url)
-        _, openai_api_key, user_api_key, base_url = await _get_api_context(
-            user_id, model
-        )
+        # 3. Get API context (clients)
+        (
+            chat_client,
+            embedding_client,
+            rewriter_client,
+        ) = await _get_api_context(user_id, model)
 
         # 4. Get message history
         message_history = await _get_processed_history(conn, chat_id, user_id)
@@ -187,7 +168,7 @@ async def process_chat_request(
                 rewritten_query = await query_rewriter.rewrite_query(
                     current_question=query_text,
                     message_history=message_history,
-                    user_api_key=openai_api_key,
+                    client=rewriter_client,
                     user_id=str(user_id),
                     lecture_id=str(lecture_id),
                     chat_id=str(chat_id),
@@ -200,8 +181,8 @@ async def process_chat_request(
             conn=conn,
             lecture_id=lecture_id,
             query_text=rewritten_query,
-            user_api_key=openai_api_key,
-            user_id=user_id,
+            client=embedding_client,
+            user_id=str(user_id),
             chat_id=str(chat_id),
             top_k=settings.rag_top_k,
         )
@@ -215,9 +196,8 @@ async def process_chat_request(
             lecture_id=str(lecture_id),
             chat_id=str(chat_id),
             user_id=str(user_id),
-            user_api_key=user_api_key,
+            client=chat_client,
             model=model,
-            base_url=base_url,
         ):
             yield chunk
 
@@ -288,20 +268,14 @@ async def process_title_generation(
         if not assistant_text:
             raise ValueError("Assistant message must contain at least one text part")
 
-        # 3. Fetch OpenAI API key for title generation (default provider)
-        try:
-            user_api_key = get_user_api_key(str(user_id), provider="openai")
-        except SecretNotFoundError:
-            logging.error(f"OpenAI API key not found for user {user_id}")
-            raise InvalidAPIKeyError(
-                "User OpenAI API key not found. Please configure your API key in settings."
-            )
+        # 3. Fetch client for title generation
+        client, _ = await get_llm_context(user_id, settings.title_model)
 
         # 4. Generate title via LLM
         title, _ = await llm_utils.generate_chat_title(
             user_message=user_text,
             assistant_message=assistant_text,
-            user_api_key=user_api_key,
+            client=client,
             user_id=str(user_id),
             lecture_id=str(lecture_id),
             chat_id=str(chat_id),

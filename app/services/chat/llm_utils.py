@@ -1,49 +1,29 @@
 import asyncio
 import logging
-from typing import AsyncGenerator, List, Dict, Any
+from typing import AsyncGenerator, List, Dict, Any, TYPE_CHECKING
 
 from app.utils.config import Settings
 from app.utils.secret_manager import InvalidAPIKeyError
-from app.utils.llm_utils import extract_text_from_response
-from app.utils.posthog_client import get_openai_client
+from app.utils.llm_utils import (
+    extract_text_from_response,
+    extract_metadata,
+    is_authentication_error,
+)
+from app.utils.model_provider_mapping import get_provider_for_model
 from app.utils.s3_utils import get_s3_client, download_image_as_base64
+
+if TYPE_CHECKING:
+    from posthog.ai.openai import AsyncOpenAI
 
 
 # Constants
 TITLE_MAX_LENGTH = 80
-TITLE_MODEL = "gpt-4.1-nano"
 TITLE_MAX_TOKENS = 50
 TITLE_TEMPERATURE = 0.7
 ASSISTANT_MESSAGE_PREVIEW_LENGTH = 200
 
 # Initialize settings
 settings = Settings()
-
-
-def _is_authentication_error(error: Exception) -> bool:
-    """Checks if the error is related to authentication/invalid API key."""
-    error_str = str(error).lower()
-    auth_indicators = ["authentication", "unauthorized", "invalid api key", "401"]
-    return any(indicator in error_str for indicator in auth_indicators)
-
-
-def _extract_metadata(response) -> dict:
-    """Extracts metadata from LLM response."""
-    usage = None
-    if hasattr(response, "usage") and response.usage:
-        if hasattr(response.usage, "model_dump"):
-            usage = response.usage.model_dump()
-        else:
-            usage = {
-                "prompt_tokens": getattr(response.usage, "prompt_tokens", None),
-                "completion_tokens": getattr(response.usage, "completion_tokens", None),
-                "total_tokens": getattr(response.usage, "total_tokens", None),
-            }
-    return {
-        "model": getattr(response, "model", ""),
-        "usage": usage,
-        "response_id": getattr(response, "id", ""),
-    }
 
 
 def _create_chat_posthog_properties(
@@ -77,10 +57,9 @@ async def stream_chat_response(
     lecture_id: str,
     chat_id: str,
     user_id: str,
-    user_api_key: str,
+    client: "AsyncOpenAI",
     model: str,
     message_history: List[Dict[str, Any]] | None = None,
-    base_url: str | None = None,
 ) -> AsyncGenerator[str, None]:
     """
     Stream chat response using OpenAI Chat Completions API streaming.
@@ -94,7 +73,7 @@ async def stream_chat_response(
         lecture_id: Lecture ID for tracking
         chat_id: Chat ID for PostHog trace tracking
         user_id: User ID for tracking
-        user_api_key: User's OpenAI API key
+        client: PostHog-wrapped OpenAI client
         model: Model to use for generation
         message_history: Optional list of previous messages (last 5 turns)
     """
@@ -194,28 +173,6 @@ Explain the user's query based on the provided Lecture Slides. Your explanations
         lecture_id, chat_id, len(context_chunks)
     )
 
-    client = get_openai_client(user_api_key, base_url=base_url)
-
-    # Log the prompt for debugging
-    logging.info(f"--- CHAT PROMPT (lecture_id={lecture_id}, chat_id={chat_id}) ---")
-    for msg in messages:
-        role = msg.get("role")
-        content = msg.get("content")
-        if isinstance(content, list):
-            # Handle multi-modal content by summarizing image data
-            log_content = []
-            for item in content:
-                if item.get("type") == "image_url":
-                    log_content.append(
-                        {"type": "image_url", "url": "[IMAGE_DATA_TRUNCATED]"}
-                    )
-                else:
-                    log_content.append(item)
-            logging.info(f"[{role}]: {log_content}")
-        else:
-            logging.info(f"[{role}]: {content}")
-    logging.info("--- END CHAT PROMPT ---")
-
     try:
         stream = await client.chat.completions.create(
             model=model,
@@ -225,6 +182,7 @@ Explain the user's query based on the provided Lecture Slides. Your explanations
             posthog_trace_id=chat_id,
             posthog_properties={
                 "$ai_span_name": "chat_response",
+                "$ai_provider": get_provider_for_model(model),
                 **posthog_properties,
             },
         )
@@ -244,7 +202,7 @@ Explain the user's query based on the provided Lecture Slides. Your explanations
         # Re-raise to allow FastAPI to handle the cancellation properly
         raise
     except Exception as e:
-        if _is_authentication_error(e):
+        if is_authentication_error(e):
             logging.error(
                 f"OpenAI authentication error (invalid API key): "
                 f"lecture_id={lecture_id}, user_id={user_id}, model={model}, error={e}"
@@ -261,7 +219,7 @@ Explain the user's query based on the provided Lecture Slides. Your explanations
 async def generate_chat_title(
     user_message: str,
     assistant_message: str,
-    user_api_key: str,
+    client: "AsyncOpenAI",
     user_id: str,
     lecture_id: str,
     chat_id: str,
@@ -273,7 +231,7 @@ async def generate_chat_title(
     Args:
         user_message: The first user message text
         assistant_message: The first assistant response text
-        user_api_key: User's OpenAI API key
+        client: PostHog-wrapped OpenAI client
         user_id: User ID for tracking
         lecture_id: Lecture ID for tracking
         chat_id: Chat ID for PostHog trace tracking
@@ -294,20 +252,9 @@ async def generate_chat_title(
 
     posthog_properties = _create_title_posthog_properties(lecture_id, chat_id)
 
-    # Always use OpenAI default base_url for title generation
-    client = get_openai_client(user_api_key)
-
-    # Log the prompt for debugging
-    logging.info(
-        f"--- TITLE GENERATION PROMPT (lecture_id={lecture_id}, chat_id={chat_id}) ---"
-    )
-    for msg in messages:
-        logging.info(f"[{msg.get('role')}]: {msg.get('content')}")
-    logging.info("--- END TITLE GENERATION PROMPT ---")
-
     try:
         response = await client.chat.completions.create(
-            model=TITLE_MODEL,
+            model=settings.title_model,
             messages=messages,
             max_tokens=TITLE_MAX_TOKENS,
             temperature=TITLE_TEMPERATURE,
@@ -315,6 +262,7 @@ async def generate_chat_title(
             posthog_trace_id=chat_id,
             posthog_properties={
                 "$ai_span_name": "chat_title",
+                "$ai_provider": get_provider_for_model(settings.title_model),
                 **posthog_properties,
             },
         )
@@ -324,12 +272,12 @@ async def generate_chat_title(
         if len(title) > TITLE_MAX_LENGTH:
             title = title[: TITLE_MAX_LENGTH - 3] + "..."
 
-        usage_metadata = _extract_metadata(response)
+        usage_metadata = extract_metadata(response)
 
         return title, usage_metadata
 
     except Exception as e:
-        if _is_authentication_error(e):
+        if is_authentication_error(e):
             logging.error(
                 f"OpenAI authentication error (invalid API key) for title generation: "
                 f"lecture_id={lecture_id}, user_id={user_id}, error={e}"

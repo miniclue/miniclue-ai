@@ -6,13 +6,9 @@ import asyncpg
 
 from app.services.embedding import db_utils
 from app.schemas.embedding import EmbeddingPayload
-from app.services.embedding import llm_utils
+from app.utils import embedding_utils
+from app.utils import llm_utils
 from app.utils.config import Settings
-from app.utils.secret_manager import (
-    get_user_api_key,
-    SecretNotFoundError,
-    InvalidAPIKeyError,
-)
 
 settings = Settings()
 
@@ -68,28 +64,17 @@ async def process_embedding_job(payload: EmbeddingPayload):
             enriched_text = " ".join(texts_to_join).strip()
             enriched_texts.append(enriched_text)
 
-        # 4. Fetch user OpenAI API key from Secret Manager (required)
-        try:
-            user_api_key = get_user_api_key(
-                payload.customer_identifier, provider="openai"
-            )
-        except SecretNotFoundError:
-            logging.error(f"API key not found for user {payload.customer_identifier}")
-            raise InvalidAPIKeyError(
-                "User API key not found. Please configure your API key in settings."
-            )
-        except Exception as e:
-            logging.error(
-                f"Failed to fetch user API key for {payload.customer_identifier}: {e}"
-            )
-            raise InvalidAPIKeyError(f"Failed to access API key: {str(e)}")
+        # 4. Fetch user API context (required)
+        embedding_client, _ = await llm_utils.get_llm_context(
+            payload.customer_identifier, settings.embedding_model, is_embedding=True
+        )
 
         # 5. Generate embeddings in a batch, capturing metadata
-        embedding_results, metadata = await llm_utils.generate_embeddings(
+        embedding_results, metadata = embedding_utils.generate_embeddings(
             texts=enriched_texts,
             lecture_id=str(lecture_id),
             user_id=payload.customer_identifier,
-            user_api_key=user_api_key,
+            client=embedding_client,
         )
 
         # 5. Prepare data for batch database insertion, ensuring result count matches inputs

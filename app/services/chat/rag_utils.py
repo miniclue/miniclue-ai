@@ -5,23 +5,23 @@ from typing import List, Dict, Any
 import asyncpg
 
 from app.services.chat import db_utils
-from app.services.embedding import llm_utils
+from app.utils import embedding_utils
 from app.utils.config import Settings
 
 settings = Settings()
 
 
-async def generate_query_embedding(
-    text: str, user_api_key: str, user_id: str, chat_id: str
+def generate_query_embedding(
+    text: str, client: Any, user_id: str, chat_id: str
 ) -> List[float]:
     """
     Create embedding for user query.
     """
-    results, _ = await llm_utils.generate_embeddings(
+    results, _ = embedding_utils.generate_embeddings(
         texts=[text],
         chat_id=chat_id,
         user_id=user_id,
-        user_api_key=user_api_key,
+        client=client,
     )
 
     if not results:
@@ -38,7 +38,7 @@ async def retrieve_relevant_chunks(
     lecture_id: UUID,
     chat_id: str,
     query_text: str,
-    user_api_key: str,
+    client: Any,
     user_id: str,
     top_k: int = 5,
 ) -> List[Dict[str, Any]]:
@@ -47,9 +47,7 @@ async def retrieve_relevant_chunks(
     Returns list of chunk texts with metadata (slide_number, chunk_index).
     """
     # Generate query embedding
-    query_embedding = await generate_query_embedding(
-        query_text, user_api_key, user_id, chat_id
-    )
+    query_embedding = generate_query_embedding(query_text, client, user_id, chat_id)
 
     # Query similar embeddings
     similar_embeddings = await db_utils.query_similar_embeddings(

@@ -6,12 +6,9 @@ import asyncpg
 from app.services.image_analysis import db_utils, llm_utils, s3_utils, pubsub_utils
 from app.utils.config import Settings
 from app.schemas.image_analysis import ImageAnalysisPayload
-from app.utils.secret_manager import (
-    get_user_api_key,
-    SecretNotFoundError,
-    InvalidAPIKeyError,
-)
+from app.utils.llm_utils import get_llm_context
 from app.utils.s3_utils import get_s3_client
+
 
 settings = Settings()
 
@@ -63,21 +60,12 @@ async def process_image_analysis_job(
             s3_client, settings.s3_bucket_name, storage_path
         )
 
-        # 4. Fetch user OpenAI API key from Secret Manager (required)
-        try:
-            user_api_key = get_user_api_key(customer_identifier, provider="openai")
-        except SecretNotFoundError:
-            logging.error(f"API key not found for user {customer_identifier}")
-            raise InvalidAPIKeyError(
-                "User API key not found. Please configure your API key in settings."
-            )
-        except Exception as e:
-            logging.error(
-                f"Failed to fetch user API key for {customer_identifier}: {e}"
-            )
-            raise InvalidAPIKeyError(f"Failed to access API key: {str(e)}")
+        # 4. Fetch user API context (required)
+        user_client, _ = await get_llm_context(
+            customer_identifier, settings.image_analysis_model
+        )
 
-        # 5. Analyze image with OpenAI
+        # 5. Analyze image with selected model
         # Perform image analysis and capture metadata
         analysis_result, metadata = await llm_utils.analyze_image(
             image_bytes=image_bytes,
@@ -86,7 +74,7 @@ async def process_image_analysis_job(
             customer_identifier=customer_identifier,
             name=name,
             email=email,
-            user_api_key=user_api_key,
+            client=user_client,
         )
 
         # Use a transaction for the final updates to ensure atomicity

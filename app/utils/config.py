@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     # OpenAI
     openai_api_base_url: str = "https://api.openai.com/v1"
     # Gemini
-    gemini_api_base_url: str = "https://generativelanguage.googleapis.com/v1beta"
+    gemini_api_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai"
     # Anthropic
     anthropic_api_base_url: str = "https://api.anthropic.com/v1"
     # Grok
@@ -35,10 +35,15 @@ class Settings(BaseSettings):
     posthog_api_key: str = ""
     posthog_api_url: str = "https://us.i.posthog.com"
     # Models
-    embedding_model: str = "text-embedding-3-small"
-    image_analysis_model: str = "gpt-4.1-nano"
+    embedding_model: str = "gemini-embedding-001"
+    image_analysis_model: str = "gemini-2.5-flash-lite"
+    query_rewriter_model: str = "gemini-2.5-flash-lite"
+    title_model: str = "gemini-2.5-flash-lite"
+
+    # Models (Deprecated)
     explanation_model: str = "gpt-4o-mini"
     summary_model: str = "gpt-4.1-nano"
+
     # RAG
     rag_top_k: int = 5
     # Server
