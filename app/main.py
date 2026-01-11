@@ -5,6 +5,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from contextlib import asynccontextmanager
 
 from app.utils.config import Settings
+from app.utils.posthog_client import shutdown_posthog
 from app.routers import (
     chat,
     embedding,
@@ -32,8 +33,8 @@ async def lifespan(app: FastAPI):
     logging.info(f"Environment: {settings.app_env}")
     logging.info("Routers registered: /ingestion, /embedding, /image-analysis, /chat")
     yield
-    # Shutdown (if needed in the future)
-    pass
+    # Shutdown
+    shutdown_posthog()
 
 
 app = FastAPI(title="MiniClue AI Service", lifespan=lifespan)

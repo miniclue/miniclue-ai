@@ -1,54 +1,67 @@
-# AI Lecture Service
+# MiniClue AI Service (`miniclue-ai`)
 
-A FastAPI microservice to handle AI‐driven lecture pipeline jobs (ingestion, image analysis, embedding, chat).
+The Python microservice responsible for the heavy lifting in the MiniClue platform. It handles PDF ingestion, RAG pipeline processing, and LLM inference.
 
-## Setup
+**Role in Stack:**
 
-1. Ensure Python 3.13+ (<4.0) is installed.
-2. Clone the repository.
-3. Create a `.env` file in the project root with the environment variables listed below.
-4. Install dependencies:
+- **Ingestion:** Parses PDFs and extracts text/images (PyMuPDF).
+- **Worker:** Consumes Google Pub/Sub messages for async processing.
+- **AI:** Generates embeddings (OpenAI) and handles Chat streaming.
 
-   ```
-   poetry install
-   ```
+## 🛠 Prerequisites
 
-5. Activate venv
+- **Python 3.13+**
+- **Poetry** (Dependency Management)
+- **Supabase** (Postgres & Storage access)
+- **Google Cloud SDK** (For local authentication)
 
-   ```
-   eval $(poetry env activate)
-   ```
+## 🚀 Quick Start
 
-6. Run the server:
+> See [CONTRIBUTING.md](https://github.com/miniclue/miniclue-info/blob/main/CONTRIBUTING.md) for full details on how to setup and contribute to the project.
 
-   ```
-   poetry run start
-   ```
+1. **Fork & Clone**
 
-## Environment Variables
-
-Set the following environment variables in .env.example.
-
-## Testing
-
-Run tests with:
-
-```
-poetry run pytest
+```bash
+# Fork the repository on GitHub first, then:
+git clone https://github.com/your-username/miniclue-ai.git
+cd miniclue-ai
+git remote add upstream https://github.com/miniclue/miniclue-ai.git
+poetry install
 ```
 
-## CI/CD Workflow
+2. **Environment Setup**
+   Copy the example config:
 
-### Staging Environment
+```bash
+cp .env.example .env
 
-1. A developer writes code on a feature branch and opens a Pull Request to `main`.
-2. After code review and approval, the PR is merged.
-3. The merge to `main` automatically triggers a GitHub Actions workflow (`cd.yml`).
-4. This workflow builds a Docker image tagged with the commit SHA and deploys it to the **staging** environment.
+```
 
-### Production Environment
+_Ensure you populate all fields as stated in the `.env.example` file._
 
-1. After changes are verified in staging, a release can be deployed to production.
-2. Create a new release on the GitHub repository.
-3. This will trigger the release workflow (`release.yml`).
-4. This workflow builds a Docker image tagged with the version (e.g., `v1.0.0`) and deploys it to the **production** environment.
+3. **Run Locally**
+
+```bash
+poetry run start
+# Service will run at http://127.0.0.1:8000
+
+```
+
+4. **Always format and lint your code before committing**
+
+```bash
+poetry run black .
+poetry run ruff check .
+```
+
+## 📝 Pull Request Process
+
+1. Create a new branch for your feature or bugfix: `git checkout -b feature/my-cool-improvement`.
+2. Ensure your code follows the coding standards and project architecture.
+3. Push to your fork: `git push origin feature/my-cool-improvement`.
+4. Submit a Pull Request from your fork to the original repository's `main` branch.
+5. Provide a clear description of the changes in your PR.
+6. Once your PR is approved and merged into `main`, the CI/CD pipeline will automatically deploy it to the [staging environment](https://stg.svc.miniclue.com) for verification.
+7. Once a new release is created, the CI/CD pipeline will automatically deploy it to the [production environment](https://svc.miniclue.com).
+
+> Note: Merging of PR and creation of release will be done by repo maintainers.

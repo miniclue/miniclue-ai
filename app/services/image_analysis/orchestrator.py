@@ -3,7 +3,7 @@ import json
 
 import asyncpg
 
-from app.services.image_analysis import db_utils, llm_utils, s3_utils 
+from app.services.image_analysis import db_utils, llm_utils, s3_utils
 from app.utils.config import Settings
 from app.schemas.image_analysis import ImageAnalysisPayload
 from app.utils.llm_utils import get_llm_context
