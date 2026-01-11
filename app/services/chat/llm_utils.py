@@ -11,6 +11,7 @@ from app.utils.llm_utils import (
 )
 from app.utils.model_provider_mapping import get_provider_for_model
 from app.utils.s3_utils import get_s3_client, download_image_as_base64
+from app.utils.posthog_client import get_posthog_kwargs
 
 if TYPE_CHECKING:
     from posthog.ai.openai import AsyncOpenAI
@@ -178,13 +179,15 @@ Explain the user's query based on the provided Lecture Slides. Your explanations
             model=model,
             messages=messages,
             stream=True,
-            posthog_distinct_id=user_id,
-            posthog_trace_id=chat_id,
-            posthog_properties={
-                "$ai_span_name": "chat_response",
-                "$ai_provider": get_provider_for_model(model),
-                **posthog_properties,
-            },
+            **get_posthog_kwargs(
+                user_id=user_id,
+                trace_id=chat_id,
+                properties={
+                    "$ai_span_name": "chat_response",
+                    "$ai_provider": get_provider_for_model(model),
+                    **posthog_properties,
+                },
+            ),
         )
 
         async for chunk in stream:
@@ -258,13 +261,15 @@ async def generate_chat_title(
             messages=messages,
             max_tokens=TITLE_MAX_TOKENS,
             temperature=TITLE_TEMPERATURE,
-            posthog_distinct_id=user_id,
-            posthog_trace_id=chat_id,
-            posthog_properties={
-                "$ai_span_name": "chat_title",
-                "$ai_provider": get_provider_for_model(settings.title_model),
-                **posthog_properties,
-            },
+            **get_posthog_kwargs(
+                user_id=user_id,
+                trace_id=chat_id,
+                properties={
+                    "$ai_span_name": "chat_title",
+                    "$ai_provider": get_provider_for_model(settings.title_model),
+                    **posthog_properties,
+                },
+            ),
         )
 
         title = extract_text_from_response(response).strip()

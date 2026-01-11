@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING, Any
 
 from app.utils.config import Settings
 from app.utils.model_provider_mapping import Provider
 
 if TYPE_CHECKING:
     from posthog import Posthog
-    from posthog.ai.openai import AsyncOpenAI
     from google.genai import Client
 
 # Initialize settings
@@ -25,6 +24,10 @@ def get_posthog_client() -> Optional[Posthog]:
     global _posthog_client
 
     if _posthog_client is None:
+        # Only enable PostHog in staging and production
+        if settings.app_env not in ["staging", "prod", "production"]:
+            return None
+
         if not settings.posthog_api_key:
             logging.warning(
                 "Posthog API key not configured. Posthog logging will be disabled."
@@ -65,21 +68,29 @@ def get_base_url_for_provider(provider: Provider) -> str:
     return provider_base_urls.get(provider, settings.openai_api_base_url)
 
 
-def get_openai_client(api_key: str, base_url: str | None = None) -> AsyncOpenAI:
+def get_openai_client(api_key: str, base_url: str | None = None) -> Any:
     """
-    Get an OpenAI client wrapped with Posthog for automatic LLM analytics.
+    Get an OpenAI client. Wraps with Posthog for automatic LLM analytics if enabled.
 
     Args:
         api_key: API key for the provider
         base_url: Optional base URL. If not provided, uses OpenAI base URL from settings.
 
     Returns:
-        AsyncOpenAI client with Posthog integration
+        AsyncOpenAI client (possibly with Posthog integration)
     """
     posthog_client = get_posthog_client()
 
     if base_url is None:
         base_url = settings.openai_api_base_url
+
+    if not posthog_client:
+        from openai import AsyncOpenAI
+
+        return AsyncOpenAI(
+            api_key=api_key,
+            base_url=base_url,
+        )
 
     from posthog.ai.openai import AsyncOpenAI
 
@@ -88,6 +99,24 @@ def get_openai_client(api_key: str, base_url: str | None = None) -> AsyncOpenAI:
         base_url=base_url,
         posthog_client=posthog_client,  # Optional: if None, Posthog will use default client
     )
+
+
+def get_posthog_kwargs(
+    user_id: str, trace_id: str, properties: dict[str, Any]
+) -> dict[str, Any]:
+    """
+    Get Posthog-specific keyword arguments for OpenAI client calls.
+    Returns an empty dict if Posthog is disabled.
+    """
+    posthog_client = get_posthog_client()
+    if not posthog_client:
+        return {}
+
+    return {
+        "posthog_distinct_id": user_id,
+        "posthog_trace_id": trace_id,
+        "posthog_properties": properties,
+    }
 
 
 def get_gemini_client(api_key: str) -> "Client":

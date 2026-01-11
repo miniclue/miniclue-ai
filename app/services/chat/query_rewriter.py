@@ -5,6 +5,7 @@ from app.utils.config import Settings
 from app.utils.secret_manager import InvalidAPIKeyError
 from app.utils.llm_utils import extract_text_from_response
 from app.utils.model_provider_mapping import get_provider_for_model
+from app.utils.posthog_client import get_posthog_kwargs
 
 if TYPE_CHECKING:
     from posthog.ai.openai import AsyncOpenAI
@@ -105,13 +106,17 @@ Instructions:
         response = await client.chat.completions.create(
             model=settings.query_rewriter_model,
             messages=messages,
-            posthog_distinct_id=user_id,
-            posthog_trace_id=chat_id,
-            posthog_properties={
-                "$ai_span_name": "chat_query_rewriter",
-                "$ai_provider": get_provider_for_model(settings.query_rewriter_model),
-                **posthog_properties,
-            },
+            **get_posthog_kwargs(
+                user_id=user_id,
+                trace_id=chat_id,
+                properties={
+                    "$ai_span_name": "chat_query_rewriter",
+                    "$ai_provider": get_provider_for_model(
+                        settings.query_rewriter_model
+                    ),
+                    **posthog_properties,
+                },
+            ),
         )
 
         rewritten_query = extract_text_from_response(response).strip()
