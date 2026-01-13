@@ -4,17 +4,24 @@ from uuid import UUID
 import asyncpg
 
 
-async def verify_lecture_exists(conn: asyncpg.Connection, lecture_id: UUID) -> bool:
+async def verify_lecture_exists(
+    conn: asyncpg.Connection, lecture_id: UUID, allow_complete: bool = False
+) -> bool:
     """Verifies that the lecture exists and is not in a terminal state."""
+    excluded_statuses = ["failed"]
+    if not allow_complete:
+        excluded_statuses.append("complete")
+
     exists = await conn.fetchval(
         """
         SELECT EXISTS (
             SELECT 1
             FROM lectures
-            WHERE id = $1 AND status NOT IN ('failed', 'complete')
+            WHERE id = $1 AND status::text NOT IN (SELECT unnest($2::text[]))
         );
         """,
         lecture_id,
+        excluded_statuses,
     )
     if not exists:
         logging.warning(f"Lecture {lecture_id} not found or is in a terminal state.")
