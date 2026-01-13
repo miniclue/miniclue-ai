@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     s3_access_key: str = ""
     s3_secret_key: str = ""
     s3_bucket_name: str = "miniclue-documents-local"
-    s3_endpoint_url: str = "http://127.0.0.1:54321/storage/v1/s3"
+    s3_endpoint_url: str = ""
 
     # Postgres
     postgres_dsn: str = ""
@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     port: int = 8000
 
     # Pub/Sub Emulator
-    pubsub_emulator_host: str = "localhost:8085"
+    pubsub_emulator_host: str = ""
 
     # --- GitHub Secrets ---
 

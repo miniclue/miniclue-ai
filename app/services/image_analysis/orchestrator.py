@@ -46,7 +46,8 @@ async def process_image_analysis_job(
         conn = await asyncpg.connect(settings.postgres_dsn, statement_cache_size=0)
 
         # 1. Verify lecture exists (Defensive Subscriber)
-        if not await verify_lecture_exists(conn, lecture_id):
+        # We allow 'complete' state because image analysis might finish after embeddings.
+        if not await verify_lecture_exists(conn, lecture_id, allow_complete=True):
             logging.warning(f"Lecture {lecture_id} not found. Stopping job.")
             return
 
