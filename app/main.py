@@ -83,7 +83,7 @@ async def generic_exception_handler(request: Request, exc: Exception):
         f"Unhandled exception for {request.method} {request.url.path}: {type(exc).__name__}",
         exc_info=exc,
     )
-    return JSONResponse(status_code=500, content={"detail": "Internal Server Error"})
+    return JSONResponse(status_code=500, content={"detail": str(exc)})
 
 
 # Include routers for Pub/Sub push subscriptions

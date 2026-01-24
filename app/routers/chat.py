@@ -55,19 +55,14 @@ async def handle_chat(request: ChatRequest):
                 except Exception:
                     pass
                 raise
-            except InvalidAPIKeyError as e:
-                logging.error(
-                    f"Invalid API key for chat: lecture_id={request.lecture_id}, "
-                    f"chat_id={request.chat_id}, user_id={request.user_id}, "
-                    f"model={request.model}, error={e}"
+            except (InvalidAPIKeyError, ValueError) as e:
+                error_type = (
+                    "Invalid API key"
+                    if isinstance(e, InvalidAPIKeyError)
+                    else "Validation error"
                 )
-                error_chunk = ChatStreamChunk(
-                    content="Error: Invalid API key", done=True
-                )
-                yield f"data: {error_chunk.model_dump_json()}\n\n"
-            except ValueError as e:
                 logging.error(
-                    f"Validation error for chat: lecture_id={request.lecture_id}, "
+                    f"{error_type} for chat: lecture_id={request.lecture_id}, "
                     f"chat_id={request.chat_id}, user_id={request.user_id}, "
                     f"model={request.model}, error={e}"
                 )
@@ -80,9 +75,7 @@ async def handle_chat(request: ChatRequest):
                     f"model={request.model}, error={e}",
                     exc_info=True,
                 )
-                error_chunk = ChatStreamChunk(
-                    content="Error: Failed to process chat request", done=True
-                )
+                error_chunk = ChatStreamChunk(content=f"Error: {str(e)}", done=True)
                 yield f"data: {error_chunk.model_dump_json()}\n\n"
 
         return StreamingResponse(
